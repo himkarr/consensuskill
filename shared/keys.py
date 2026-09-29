@@ -9,6 +9,7 @@ from shared.constants import KEY_PREFIX
 INGEST_STREAM = f"{KEY_PREFIX}:ingest"  # every client action lands here
 INGEST_GROUP = f"{KEY_PREFIX}:engine"  # consumer group for the engine
 INGEST_BLOCK_MS = 2000
+INGEST_MAXLEN = 10_000  # approximate XADD trim: bounds memory on hosted Redis
 
 # Keys ----------------------------------------------------------------------
 ROOM_STATE = f"{KEY_PREFIX}:room:{{code}}:state"  # JSON document (single writer)
@@ -21,6 +22,10 @@ ENGINE_LOCK = f"{KEY_PREFIX}:lock:engine"  # only one timer loop per instance
 # Pub/Sub channels ----------------------------------------------------------
 ROOM_EVENTS = f"{KEY_PREFIX}:room:{{code}}:events"  # state/chat fan-out
 REPLY = f"{KEY_PREFIX}:reply:{{conn_id}}"  # per-connection request/reply
+# Best-effort "there is work in the ingest stream" signal. The engine sleeps
+# on this instead of polling XREADGROUP, so a hosted Redis (Upstash: 500K
+# commands/month) stays nearly free while the game reacts instantly.
+WAKE = f"{KEY_PREFIX}:wake"
 
 # Patterns every gateway subscribes to once at startup, so no gateway ever has
 # to re-subscribe while serving traffic (no races, no missed first message).

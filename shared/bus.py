@@ -7,6 +7,7 @@ Nothing in here knows about game rules.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from redis.asyncio import Redis
@@ -14,14 +15,30 @@ from redis.asyncio import Redis
 from shared import keys
 from shared.schemas import RoomState
 
+logger = logging.getLogger(__name__)
+
 
 def encode(message: dict[str, Any]) -> str:
     return json.dumps(message, separators=(",", ":"), default=str)
 
 
 async def send_action(redis: Redis, action: dict[str, Any]) -> None:
-    """Publish a client action to the single ingest stream."""
-    await redis.xadd(keys.INGEST_STREAM, {"payload": encode(action)})
+    """Publish a client action to the single ingest stream.
+
+    Also pings the wake channel so a polling engine (BLOCK disabled on hosted
+    Redis) wakes immediately instead of waiting for its next safety-net poll.
+    The ping is best-effort: the stream write is the source of truth.
+    """
+    await redis.xadd(
+        keys.INGEST_STREAM,
+        {"payload": encode(action)},
+        maxlen=keys.INGEST_MAXLEN,
+        approximate=True,
+    )
+    try:
+        await redis.publish(keys.WAKE, "1")
+    except Exception:  # noqa: BLE001 - wake is an optimisation, never a failure
+        logger.debug("wake publish failed", exc_info=True)
 
 
 async def reply(redis: Redis, conn_id: str, message: dict[str, Any]) -> None:

@@ -44,9 +44,25 @@ from shared.schemas import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-BLOCK_MS = int(os.environ.get("ENGINE_BLOCK_MS", "1000"))
+BLOCK_MS = os.environ.get("ENGINE_BLOCK_MS", "1000")
 CONSUMER_BATCH = int(os.environ.get("ENGINE_BATCH", "20"))
 EMPTY_POLL_DELAY = float(os.environ.get("ENGINE_EMPTY_POLL_DELAY", "0.05"))
+
+
+def parse_block_ms(raw: str | int | None, default: int = 1000) -> int | None:
+    """XREADGROUP's ``BLOCK`` argument: ``0``/negative means "no blocking" in
+    our config, but Redis rejects ``BLOCK 0`` (it means "block forever"), so we
+    translate to ``None`` = omit the argument entirely. Hosted Redis (Upstash)
+    disallows blocking reads, so deploy sets ``ENGINE_BLOCK_MS=0`` and the
+    consumer waits on the wake channel instead.
+    """
+    if raw is None:
+        raw = default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return None if value <= 0 else value
 
 
 def default_instance_id() -> str:
@@ -75,6 +91,12 @@ class RoundEngine:
         self.started_at = time.time()
         self.processed = 0
         self._stopping = False
+        # wake signals: the consumer sleeps on `wake` between XREADGROUPs and
+        # the timer loop sleeps on `timer_wake` between deadlines, so neither
+        # polls Redis when there is nothing to do (hosted Redis = 500K cmds/month).
+        self.wake = asyncio.Event()
+        self.timer_wake = asyncio.Event()
+        self.deadlines = timers.DeadlineIndex()
 
     # ------------------------------------------------------------------ setup
     async def start(self) -> None:
@@ -113,16 +135,40 @@ class RoundEngine:
         return claimed
 
     # ------------------------------------------------------------- consumer
+    async def run_wake(self) -> None:
+        """Subscribe to the wake channel the gateway pings on every action.
+
+        Best-effort: if Pub/Sub is unavailable the task exits and the consumer
+        falls back to its safety-net poll (``ENGINE_EMPTY_POLL_DELAY``).
+        """
+        try:
+            pubsub = self.redis.pubsub()
+            await pubsub.subscribe(keys.WAKE)
+            logger.info("wake subscriber on %s", keys.WAKE)
+            async for message in pubsub.listen():
+                if self._stopping:
+                    break
+                if message and message.get("type") == "message":
+                    self.wake.set()
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - wake is an optimisation, never fatal
+            logger.warning("wake subscriber failed; falling back to polling", exc_info=True)
+
     async def run_consumer(self) -> None:
         logger.info("ingest consumer started (%s)", self.consumer)
+        block = parse_block_ms(BLOCK_MS)
         while not self._stopping:
+            # Clear *before* reading: anything arriving later re-sets the event
+            # and pulls us straight back out of the wait below.
+            self.wake.clear()
             try:
                 response = await self.redis.xreadgroup(
                     self.group,
                     self.consumer,
                     {keys.INGEST_STREAM: ">"},
                     count=CONSUMER_BATCH,
-                    block=BLOCK_MS,
+                    block=block,
                 )
             except asyncio.CancelledError:
                 raise
@@ -131,14 +177,19 @@ class RoundEngine:
                 await asyncio.sleep(0.5)
                 continue
 
-            if not response:
-                # fakeredis ignores BLOCK and returns an empty list immediately;
-                # poll gently so the consumer cannot busy-loop the event loop.
-                await asyncio.sleep(EMPTY_POLL_DELAY)
+            if response:
+                for _stream, messages in response:
+                    for message_id, fields in messages:
+                        await self._process(message_id, fields)
                 continue
-            for _stream, messages in response:
-                for message_id, fields in messages:
-                    await self._process(message_id, fields)
+
+            # Empty read (fakeredis ignores BLOCK and returns immediately;
+            # Upstash forbids blocking reads): wait for the wake ping, with a
+            # safety-net timeout in case a publish was missed.
+            try:
+                await asyncio.wait_for(self.wake.wait(), timeout=EMPTY_POLL_DELAY)
+            except TimeoutError:  # noqa: UP041
+                pass
 
     async def _process(self, message_id: Any, fields: dict) -> None:
         try:
@@ -192,6 +243,7 @@ class RoundEngine:
                 raise GameError("room_not_found", "Room not found or game already ended")
             result = fn(state)
             await bus.save_room(self.redis, state)
+            self._observe_deadline(state)
             return state, result
         finally:
             await store.release_lock(self.redis, code, self.instance_id)
@@ -210,6 +262,15 @@ class RoundEngine:
 
     async def _broadcast(self, state: RoomState) -> None:
         await bus.broadcast(self.redis, state.code, rules.broadcast_state(state))
+
+    def _observe_deadline(self, state: RoomState) -> None:
+        """Keep the timer loop's in-memory deadline cache in sync and nudge it."""
+        self.deadlines.observe(state)
+        self.timer_wake.set()
+
+    def _forget_deadline(self, code: str) -> None:
+        self.deadlines.drop(code)
+        self.timer_wake.set()
 
     # -- create / join / reconnect -----------------------------------------
     async def _on_create_room(self, action: dict, conn_id: str) -> None:
@@ -231,6 +292,7 @@ class RoundEngine:
         state.conns[conn_id] = state.host_id
         sync_connected(state)
         await bus.save_room(self.redis, state, new_tokens=[state.players[0].token])
+        self._observe_deadline(state)
         await bus.reply(
             self.redis,
             conn_id,
@@ -436,6 +498,7 @@ class RoundEngine:
             await self.redis.delete(keys.token_index(player.token))
         if not state.players:
             await bus.delete_room(self.redis, state)
+            self._forget_deadline(state.code)
             return
         await self._broadcast(state)
 
@@ -448,7 +511,13 @@ class RoundEngine:
 
     # -- background loops ---------------------------------------------------
     async def run_timer(self) -> None:
-        await timers.run_timer_loop(self.redis, self.questions, self.instance_id)
+        await timers.run_timer_loop(
+            self.redis,
+            self.questions,
+            self.instance_id,
+            deadlines=self.deadlines,
+            wake=self.timer_wake,
+        )
 
     async def run_sweeper(self) -> None:
         await timers.run_sweep_loop(self.redis)
@@ -502,6 +571,7 @@ def create_engine_app(
             await engine.start()
             tasks = [
                 asyncio.create_task(engine.run_consumer(), name="ingest-consumer"),
+                asyncio.create_task(engine.run_wake(), name="wake-subscriber"),
                 asyncio.create_task(engine.run_timer(), name="phase-timer"),
                 asyncio.create_task(engine.run_sweeper(), name="room-sweeper"),
             ]

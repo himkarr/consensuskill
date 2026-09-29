@@ -38,18 +38,21 @@ def create_app(
     redis_client: Redis | None = None,
     instance_id: str | None = None,
     *,
-    embedded_engine: bool = False,
+    embedded_engine: bool | None = None,
     questions: list | None = None,
     allow_origins: list[str] | None = None,
 ) -> FastAPI:
     """Build the gateway app.
 
     ``embedded_engine=True`` also runs the round engine in this process. It is
-    used by the test-suite (one in-process stack against fakeredis) and by the
-    ``docker compose`` single-process dev profile - production always runs the
-    engine as its own service.
+    used by the test-suite (one in-process stack against fakeredis), by
+    ``EMBEDDED_ENGINE=1`` local runs, and by free-tier deploys: Render's free
+    plan fits exactly one web service, so gateway + engine share the process
+    and its 750 instance-hours/month.
     """
     instance = instance_id or default_instance_id()
+    if embedded_engine is None:
+        embedded_engine = os.environ.get("EMBEDDED_ENGINE", "").lower() in {"1", "true", "yes"}
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -78,6 +81,7 @@ def create_app(
             tasks.extend(
                 [
                     asyncio.create_task(engine.run_consumer(), name="ingest-consumer"),
+                    asyncio.create_task(engine.run_wake(), name="wake-subscriber"),
                     asyncio.create_task(engine.run_timer(), name="phase-timer"),
                 ]
             )
