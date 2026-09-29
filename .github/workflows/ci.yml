@@ -1,0 +1,151 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: backend (ruff + pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Lint
+        run: ruff check .
+      - name: Config files parse
+        run: |
+          pip install pyyaml
+          python - <<'EOF'
+          import json, yaml
+          for path in ("docker-compose.yml", "render.yaml"):
+              yaml.safe_load(open(path))
+              print(f"{path}: ok")
+          json.load(open("vercel.json"))
+          print("vercel.json: ok")
+          EOF
+      - name: Tests
+        run: pytest -q -o faulthandler_timeout=60
+
+  frontend:
+    name: frontend (tsc + vitest + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        run: npm run build
+
+  browser-smoke:
+    name: browser smoke (Playwright, live stack)
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install backend
+        run: pip install -r requirements.txt
+      - name: Install frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Start stack (engine + gateway + preview)
+        run: |
+          python -m uvicorn engine.engine:app --host 127.0.0.1 --port 8001 --log-level warning > /tmp/engine.log 2>&1 &
+          python -m uvicorn gateway.app.main:app --host 127.0.0.1 --port 8000 --log-level warning > /tmp/gateway.log 2>&1 &
+          npm --prefix frontend run build
+          npm --prefix frontend run preview > /tmp/preview.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8000/health >/dev/null &&
+            curl -sf http://127.0.0.1:8001/health >/dev/null &&
+            curl -sf http://127.0.0.1:4173/ >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8000/health && echo && curl -sf http://127.0.0.1:4173/ >/dev/null
+      - name: Run smoke test
+        working-directory: frontend
+        run: npm run smoke
+      - name: Diagnostics on failure
+        if: failure()
+        run: tail -n 100 /tmp/engine.log /tmp/gateway.log /tmp/preview.log || true
+
+  stack-e2e:
+    name: docker compose stack + browser smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Validate compose file
+        run: docker compose config -q
+      - name: Build images
+        run: |
+          docker build -t consensuskill-backend:ci .
+          docker build -f frontend/Dockerfile -t consensuskill-web:ci .
+      - name: nginx config syntax (with a resolvable upstream)
+        run: |
+          docker network create ck-e2e
+          docker run -d --name gateway --network ck-e2e nginx:1.27-alpine
+          docker run --rm --network ck-e2e consensuskill-web:ci nginx -t
+      - name: Compose up (nginx edge + 2 gateways + engine + redis)
+        run: docker compose up -d --build --wait
+      - name: Smoke test through the nginx load balancer
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend exec playwright install --with-deps chromium
+          curl -sf http://127.0.0.1:8080/health
+          echo
+          SMOKE_URL=http://127.0.0.1:8080 npm --prefix frontend run smoke
+      - name: Diagnostics on failure
+        if: failure()
+        run: docker compose logs || true
+      - name: Tear down
+        if: always()
+        run: |
+          docker compose down || true
+          docker rm -f gateway || true
+          docker network rm ck-e2e || true
