@@ -1,0 +1,86 @@
+# Local/full-stack profile: nginx edge -> N gateway replicas -> Redis -> engine.
+#
+#   docker compose up --build
+#   open http://localhost:8080
+#   docker compose up --build --scale gateway=3   # more socket replicas
+#
+# Redis is deliberately ephemeral (no volume): matches production, where a
+# restart just means an unfinished match disappears.
+name: consensuskill
+
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  gateway:
+    image: consensuskill-backend:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      ["uvicorn", "gateway.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "warning"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      ALLOWED_ORIGINS: "*"
+      INSTANCE_ID: gateway-${HOSTNAME:-local}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  engine:
+    image: consensuskill-backend:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command:
+      ["uvicorn", "engine.engine:app", "--host", "0.0.0.0", "--port", "8001", "--log-level", "warning"]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      ENGINE_BLOCK_MS: "1000" # local Redis supports blocking reads
+      ENGINE_RESCAN_SECONDS: "30"
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    restart: unless-stopped
