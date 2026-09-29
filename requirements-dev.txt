@@ -1,0 +1,5 @@
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-timeout==2.3.1
+fakeredis==2.26.2
+ruff==0.8.4
