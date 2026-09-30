@@ -56,12 +56,15 @@ consensuskill/
 ├── .dockerignore
 ├── render.yaml              # Render blueprint (free tier: 1 web service)
 ├── vercel.json              # Vercel static deploy of the SPA
-├── .github/workflows/ci.yml # 4 jobs: backend, frontend, browser smoke, compose e2e
+├── .github/workflows/
+│   ├── ci.yml               # 4 jobs: backend, frontend, browser smoke, compose e2e
+│   └── deploy.yml           # CD: gate -> ghcr.io push -> VM (SSH) / Render (hook)
 ├── data/
 │   └── questions.json       # 40-question bank {id,text,option_a,option_b}
 │
 ├── deploy/
-│   └── render-entry.sh      # Render start: embedded engine + hosted-Redis tuning
+│   ├── render-entry.sh      # Render start: embedded engine + hosted-Redis tuning
+│   └── vm-deploy.sh         # VM pull + compose up (run by deploy.yml over SSH)
 ├── docker/
 │   └── nginx/default.conf   # SPA + /ws proxy, upstream = gateway replicas
 ├── supabase/
@@ -635,6 +638,31 @@ awake.
    the web image (against a resolvable dummy `gateway` upstream), `compose up --wait`,
    then the browser smoke test **through the nginx load balancer**.
 
+### CD (`.github/workflows/deploy.yml`)
+
+Runs on every push to `main` (and `workflow_dispatch`), four jobs, each gating the
+next — a red test stops everything before anything is published:
+
+1. **gate** — `ruff check`, the 76-test pytest suite (which contains the four
+   assessment-mandated tests: `GET /health`, unique join tokens, `compute_minority`
+   splits/ties/unanimous/AFK, duplicate/late `submit_vote`) + frontend
+   typecheck/vitest. **Failure blocks the deploy.**
+2. **build + push ghcr.io** — `ghcr.io/<owner>/<repo>/backend:<sha|latest>` (gateway +
+   engine image) and `…/web:<sha|latest>` (SPA + nginx), authenticated with the
+   workflow's `GITHUB_TOKEN` (`permissions: packages: write`).
+3. **deploy-vm** (if `SSH_HOST` is set) — `rsync`s the repo to the VM and runs
+   `deploy/vm-deploy.sh`, which logs into ghcr (if `GHCR_TOKEN` is set), `compose pull`s
+   the SHA-tagged images, `up -d --no-build --wait` and curls `:8080/health`. The
+   compose file takes `BACKEND_IMAGE` / `WEB_IMAGE` overrides, so CI images and local
+   `--build` use the same file.
+4. **deploy-render** (if `RENDER_DEPLOY_HOOK` is set) — `POST`s the Render deploy hook;
+   Render rebuilds from `render.yaml` (source build, independent of ghcr).
+
+Repository secrets (all optional; unset → the job logs a skip notice instead of
+failing): `SSH_HOST`, `SSH_USER`, `SSH_PORT?`, `SSH_PRIVATE_KEY`, `GHCR_TOKEN?`,
+`RENDER_DEPLOY_HOOK?`. To make failures block *merges*, mark the `ci` workflow's
+checks as required in GitHub branch protection (repo setting, not a file).
+
 ### First deploy, step by step
 
 ```bash
@@ -660,5 +688,5 @@ awake.
 | 2 | Distributed backend (gateway, engine, Redis) | ✅ 64 tests, bot swarm + kill/reconnect PASS |
 | 3 | Frontend (React/Vite/TS, projector + player views) | ✅ typecheck, 14 vitest, build, 21/21 smoke, 11-screen M3 matte redesign |
 | 4 | Docker & orchestration + free-tier deploy configs | ✅ compose/nginx/Render/Vercel/Upstash/Supabase, CI (4 jobs), 76 tests, 21/21 smoke; **local `docker compose up` unverified — no Docker in this env (CI stack-e2e covers it)** |
-| 5 | CI/CD (GitHub Actions → ghcr → VM) | ⬜ next (workflow already runs tests + e2e; image publish/deploy wiring still open) |
+| 5 | CI/CD (GitHub Actions → ghcr → VM) | ✅ `deploy.yml`: gate (lint + 76 tests) → ghcr push → VM via SSH (`deploy/vm-deploy.sh`) / Render webhook; **runs only once the repo is on GitHub with secrets — workflow YAML validated, not yet executed** |
 | 6 | README + architecture diagram + talking points | ⬜ |
