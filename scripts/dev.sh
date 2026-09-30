@@ -22,12 +22,22 @@ REDIS_BIN="$(command -v redis-server || true)"
 REDIS_PORT=6379
 ENGINE_PORT=8001
 GATEWAY_PORT=8000
-FRONTEND_PORT=4173
+FRONTEND_PORT="${FRONTEND_PORT:-4173}" # override if another project squats the port
 FRONTEND_URL="http://127.0.0.1:$FRONTEND_PORT"
 
 # --- helpers -----------------------------------------------------------------
 
 port_up() { curl -s -m 1 "http://127.0.0.1:$1/" >/dev/null 2>&1; }
+
+# port_up alone can be fooled by an unrelated process on the same port, so
+# these verify the *right* app is answering before we skip starting it.
+engine_up() {
+  curl -s -m 1 "http://127.0.0.1:$ENGINE_PORT/health" 2>/dev/null | grep -q '"service":"engine"'
+}
+gateway_up() {
+  curl -s -m 1 "http://127.0.0.1:$GATEWAY_PORT/health" 2>/dev/null | grep -q '"service":"gateway"'
+}
+frontend_up() { curl -s -m 1 "$FRONTEND_URL/" 2>/dev/null | grep -q "ConsensusKill"; }
 
 redis_up() { redis-cli -p "$REDIS_PORT" ping 2>/dev/null | grep -q PONG; }
 
@@ -90,28 +100,39 @@ up() {
   fi
 
   echo "engine  ..."
-  if ! port_up "$ENGINE_PORT"; then
+  if engine_up; then
+    echo "  already running on :$ENGINE_PORT"
+  elif port_up "$ENGINE_PORT"; then
+    echo "ERROR: :$ENGINE_PORT answers HTTP but is not the engine (foreign process)." >&2
+    exit 1
+  else
     start_bg engine "$VENV_UVICORN" engine.engine:app --host 127.0.0.1 --port "$ENGINE_PORT" --log-level warning
     wait_for engine curl -sf "http://127.0.0.1:$ENGINE_PORT/health"
-  else
-    echo "  already running on :$ENGINE_PORT"
   fi
 
   echo "gateway ..."
-  if ! port_up "$GATEWAY_PORT"; then
+  if gateway_up; then
+    echo "  already running on :$GATEWAY_PORT"
+  elif port_up "$GATEWAY_PORT"; then
+    echo "ERROR: :$GATEWAY_PORT answers HTTP but is not the gateway (foreign process)." >&2
+    exit 1
+  else
     start_bg gateway "$VENV_UVICORN" gateway.app.main:app --host 127.0.0.1 --port "$GATEWAY_PORT" --log-level warning
     wait_for gateway curl -sf "http://127.0.0.1:$GATEWAY_PORT/health"
-  else
-    echo "  already running on :$GATEWAY_PORT"
   fi
 
   echo "frontend ..."
-  if ! port_up "$FRONTEND_PORT"; then
-    (cd "$ROOT/frontend" && npm run build) || exit 1
-    start_bg frontend npm --prefix "$ROOT/frontend" run preview
-    wait_for frontend curl -sf "$FRONTEND_URL/"
-  else
+  if frontend_up; then
     echo "  already running on :$FRONTEND_PORT"
+  elif port_up "$FRONTEND_PORT"; then
+    echo "ERROR: :$FRONTEND_PORT is served by another app (not ConsensusKill)." >&2
+    echo "  hint: FRONTEND_PORT=4199 scripts/dev.sh up" >&2
+    echo "        SMOKE_URL=http://127.0.0.1:4199 npm --prefix frontend run smoke" >&2
+    exit 1
+  else
+    (cd "$ROOT/frontend" && npm run build) || exit 1
+    start_bg frontend npm --prefix "$ROOT/frontend" run preview -- --port "$FRONTEND_PORT" --host 127.0.0.1
+    wait_for frontend curl -sf "$FRONTEND_URL/"
   fi
 
   echo
