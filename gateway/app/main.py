@@ -92,10 +92,12 @@ def create_app(
                 task.cancel()
             for task in tasks:
                 try:
-                    await task
+                    # Bounded wait: a task wedged in redis/pubsub teardown gets a
+                    # second cancel here instead of holding the app open forever.
+                    await asyncio.wait_for(task, timeout=3)
                 except asyncio.CancelledError:
                     pass
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001 - TimeoutError etc: never block shutdown
                     pass
             if app.state.engine is not None:
                 await app.state.engine.stop()
