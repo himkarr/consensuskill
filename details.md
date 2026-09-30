@@ -44,7 +44,7 @@ Config: [`pyproject.toml`](pyproject.toml) (pytest + ruff), [`requirements.txt`]
 consensuskill/
 ├── SPEC.md                  # original assignment brief
 ├── details.md               # this file
-├── README.md                # stub (Phase 6 target)
+├── README.md                # assessment-ready README (rules, diagram, script, Q&A)
 ├── pyproject.toml           # pytest + ruff config
 ├── requirements.txt         # runtime deps
 ├── requirements-dev.txt     # test/lint deps
@@ -551,7 +551,6 @@ it automatically — export them or pass them to your process manager.
 
 **Limitations / not yet done**
 
-* `README.md` is still a stub (Phase 6), and there is no architecture diagram yet.
 * **Docker is not available in this dev environment** (WSL without the Docker Desktop
   integration), so `Dockerfile`, `frontend/Dockerfile` and `docker-compose.yml` were
   validated by YAML parsing, `sh -n`, and the CI `stack-e2e` job (image builds, compose
@@ -689,4 +688,4 @@ checks as required in GitHub branch protection (repo setting, not a file).
 | 3 | Frontend (React/Vite/TS, projector + player views) | ✅ typecheck, 14 vitest, build, 21/21 smoke, 11-screen M3 matte redesign |
 | 4 | Docker & orchestration + free-tier deploy configs | ✅ compose/nginx/Render/Vercel/Upstash/Supabase, CI (4 jobs), 76 tests, 21/21 smoke; **local `docker compose up` unverified — no Docker in this env (CI stack-e2e covers it)** |
 | 5 | CI/CD (GitHub Actions → ghcr → VM) | ✅ `deploy.yml`: gate (lint + 76 tests) → ghcr push → VM via SSH (`deploy/vm-deploy.sh`) / Render webhook; **runs only once the repo is on GitHub with secrets — workflow YAML validated, not yet executed** |
-| 6 | README + architecture diagram + talking points | ⬜ |
+| 6 | README + architecture diagram + talking points | ✅ README: rules, Mermaid + ASCII diagrams, quickstart, 2–3 min presentation script, interview Q&A |
