@@ -17,6 +17,14 @@ LOGDIR="$ROOT/.run/logs"
 PIDDIR="$ROOT/.run/pids"
 mkdir -p "$LOGDIR" "$PIDDIR"
 
+# Optional gitignored env (REDIS_URL, SUPABASE_DB_URL, ...) for every service.
+if [ -f "$ROOT/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$ROOT/.env"
+  set +a
+fi
+
 VENV_UVICORN="$ROOT/.venv/bin/uvicorn"
 REDIS_BIN="$(command -v redis-server || true)"
 REDIS_PORT=6379
