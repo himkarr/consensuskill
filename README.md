@@ -172,7 +172,7 @@ same round — lives, votes and chat intact.
 | Piece | Provider | Notes |
 |---|---|---|
 | Static SPA | Vercel | `vercel.json` at repo root; set `VITE_WS_URL=wss://<render>/ws` |
-| Backend (gateway+engine in one process) | Render | `render.yaml` blueprint, `deploy/render-entry.sh`; 750 h/month = exactly one service |
+| Backend (gateway+engine in one process) | Render | `render.yaml` blueprint (image CMD + env pins); 750 h/month = exactly one service |
 | Redis | Upstash | `rediss://`, 500K cmds/month — engine tuned to stay under it |
 | Question bank (optional) | Supabase | `supabase/questions.sql` + `scripts/seed_supabase.py` |
 | Images + CD | GitHub Actions → ghcr.io → VM | `.github/workflows/deploy.yml` (gate → push → SSH/hook) |
@@ -223,7 +223,7 @@ idle (sockets drop → clients auto-reconnect).
 > through the load balancer.
 
 ---
-
+<!-- 
 ## 7. Interview talking points
 
 **Why Redis Streams (and not just Pub/Sub) for votes?**
@@ -262,9 +262,9 @@ Redis (mitigated by managed Upstash + atomic single-writer design) and the free-
 single Render instance (sleeps, cold-starts ~1 min). Gateways and the engine are
 replaceable at any moment; state lives in Redis, not in processes.
 
----
+--- -->
 
-## 8. Project layout
+## 6. Project layout
 
 ```
 consensuskill/

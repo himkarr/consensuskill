@@ -14,7 +14,6 @@ services:
     plan: free
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    startCommand: sh ./deploy/render-entry.sh
     healthCheckPath: /health
     envVars:
       - key: REDIS_URL
@@ -23,8 +22,9 @@ services:
         value: "*"
       - key: INSTANCE_ID
         generateValue: true
-      # Kept here as well as in render-entry.sh so the Dockerfile's default
-      # CMD (uvicorn gateway...) is correct even if startCommand is ignored.
+      # No startCommand: Render's docker runtime forbids it, so the image CMD
+      # (uvicorn gateway...) runs with these vars straight from the blueprint;
+      # deploy/render-entry.sh keeps the same tuning for manual runs.
       - key: EMBEDDED_ENGINE
         value: "1"
       - key: ENGINE_BLOCK_MS

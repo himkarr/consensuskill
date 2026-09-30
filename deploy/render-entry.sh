@@ -1,5 +1,7 @@
 #!/bin/sh
-# Render (free tier) start command: one web service runs gateway + engine.
+# Manual/reference start for Render free tier: one process = gateway + engine.
+# (render.yaml cannot use startCommand - docker runtime forbids it - so the
+# image CMD runs uvicorn with the same env vars pinned in the blueprint.)
 #
 # Render's free plan = 750 instance-hours/month = exactly one always-on web
 # service, so the round engine runs in-process via EMBEDDED_ENGINE=1.

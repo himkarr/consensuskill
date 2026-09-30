@@ -63,7 +63,7 @@ consensuskill/
 │   └── questions.json       # 40-question bank {id,text,option_a,option_b}
 │
 ├── deploy/
-│   ├── render-entry.sh      # Render start: embedded engine + hosted-Redis tuning
+│   ├── render-entry.sh      # manual Render start: embedded engine + Redis tuning
 │   └── vm-deploy.sh         # VM pull + compose up (run by deploy.yml over SSH)
 ├── docker/
 │   └── nginx/default.conf   # SPA + /ws proxy, upstream = gateway replicas
@@ -622,9 +622,9 @@ thing with `scripts/smoke_upstash.py` (12 checks: `XADD MAXLEN`, no-BLOCK
 | Question bank (optional) | Supabase | Postgres + REST | `supabase/questions.sql` + `scripts/seed_supabase.py`; app falls back to the JSON bank |
 | Git + CI | GitHub | Actions free (public repos) | `.github/workflows/ci.yml` |
 
-`render.yaml` (blueprint) pins the cost-critical env vars; `deploy/render-entry.sh` is
-the start command and sets the same values again (so the Dockerfile's default CMD is
-correct even without it). Behaviour to expect on the free tier: Render **sleeps after
+`render.yaml` (blueprint) pins the cost-critical env vars and runs the image CMD
+directly (Render's docker runtime forbids `startCommand`); `deploy/render-entry.sh`
+keeps the same tuning for manual runs. Behaviour to expect on the free tier: Render **sleeps after
 ~15 min idle** (~1 min cold start) — active sockets drop and the client reconnects with
 its stored token; rooms live in Redis, but timers only advance while the service is
 awake.
