@@ -183,7 +183,7 @@ idle (sockets drop → clients auto-reconnect).
 
 ---
 
-## 6. Presentation script (2–3 minutes)
+<!-- ## 6. Presentation script (2–3 minutes)
 
 > **Hook (10s).** ConsensusKill is a multiplayer liar game where the *minority* wins
 > the round. The interesting part isn't the rules — it's that ten phones, a projector,
@@ -223,7 +223,7 @@ idle (sockets drop → clients auto-reconnect).
 > through the load balancer.
 
 ---
-<!-- 
+
 ## 7. Interview talking points
 
 **Why Redis Streams (and not just Pub/Sub) for votes?**
