@@ -525,10 +525,10 @@ blockquote {
 }
 
 .decor-arrow {
-  top: 36%;
-  right: 3vw;
-  width: 175px;
-  transform: rotate(-3deg);
+  top: 46%;
+  right: calc(50% - 445px);
+  width: 200px;
+  transform: rotate(-2deg);
 }
 
 .decor-crowd {
@@ -548,6 +548,19 @@ blockquote {
   right: 5vw;
   width: 132px;
   transform: rotate(4deg);
+}
+
+/* Phase names dealt into random margin slots (JS assigns slot + rotation). */
+.decor-chip {
+  position: absolute;
+  padding: 0.22rem 0.75rem;
+  background: var(--md-surface-container);
+  border: 1px solid var(--md-outline);
+  border-radius: var(--shape-full);
+  color: var(--md-muted);
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  opacity: 0.8;
 }
 
 @media (max-width: 1024px) {
@@ -611,23 +624,6 @@ blockquote {
   display: flex;
   flex-direction: column;
   gap: 1.05rem;
-}
-
-.home-foot {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 0.4rem;
-  text-align: center;
-}
-
-.home-foot span {
-  background: var(--md-surface-container);
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--shape-full);
-  padding: 0.2rem 0.7rem;
-  font-size: 0.75rem;
-  letter-spacing: 0.04em;
 }
 
 /* =========================================================================

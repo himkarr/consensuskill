@@ -6,7 +6,6 @@ import { loadNickname } from "./useGame";
 const CODE_LENGTH = 6;
 
 const NOTES = [
-  "Two lives. Loud opinions are a liability.",
   "The crowd is always wrong — that's the point.",
   "Nobody here votes honestly. That's the fun.",
   "Quiet players win loud rounds.",
@@ -92,17 +91,57 @@ function TallyDoodle() {
   );
 }
 
-/** Right margin: a scribbled arrow pointing at the form. */
+/** Right margin: a scribbled arrow pointing at the form's Create button. */
 function ArrowNote() {
   return (
-    <svg className="decor-item decor-arrow" viewBox="0 0 175 105" fill="none" aria-hidden="true">
-      <text className="decor-label" x="172" y="22" textAnchor="end">
+    <svg className="decor-item decor-arrow" viewBox="0 0 200 110" fill="none" aria-hidden="true">
+      <text className="decor-label" x="196" y="22" textAnchor="end">
         start here
       </text>
-      <path className="ink-mint" d="M160 40 C128 48 86 58 54 86" />
-      <path className="ink-mint" d="M54 86 L74 83" />
-      <path className="ink-mint" d="M54 86 L61 68" />
+      <path className="ink-mint" d="M190 36 C150 48 80 58 14 84" />
+      <path className="ink-mint" d="M14 84 L36 79" />
+      <path className="ink-mint" d="M14 84 L22 66" />
     </svg>
+  );
+}
+
+/** Fixed margin slots (3 left, 3 right) the phase chips are dealt into. */
+const CHIP_SLOTS: Array<{ top: string; left?: string; right?: string }> = [
+  { top: "24%", left: "calc(50% - 480px)" },
+  { top: "52%", left: "calc(50% - 470px)" },
+  { top: "70%", left: "calc(50% - 480px)" },
+  { top: "14%", right: "calc(50% - 470px)" },
+  { top: "32%", right: "calc(50% - 470px)" },
+  { top: "66%", right: "calc(50% - 470px)" },
+];
+
+/** Phase names scattered along the margins like hand-written doodles. */
+function PhaseChips() {
+  const [chips] = useState(() => {
+    const pool = Object.values(PHASE_LABEL).slice(0, 6);
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    return pool.map((label, i) => ({
+      label,
+      slot: CHIP_SLOTS[i],
+      rot: (Math.random() * 14 - 7).toFixed(1),
+    }));
+  });
+
+  return (
+    <>
+      {chips.map(({ label, slot, rot }) => (
+        <span
+          key={label}
+          className="decor-chip"
+          style={{ ...slot, transform: `rotate(${rot}deg)` }}
+        >
+          {label}
+        </span>
+      ))}
+    </>
   );
 }
 
@@ -164,6 +203,7 @@ export default function Home({ game }: { game: Game }) {
           <CrowdDoodle />
         </div>
         <BallotDoodle />
+        <PhaseChips />
       </div>
       <div className="home">
         <header className="home-hero">
@@ -237,14 +277,6 @@ export default function Home({ game }: { game: Game }) {
             </p>
           )}
         </form>
-
-        <footer className="home-foot muted small">
-          {Object.entries(PHASE_LABEL)
-            .slice(0, 6)
-            .map(([key, label]) => (
-              <span key={key}>{label}</span>
-            ))}
-        </footer>
       </div>
     </div>
   );
