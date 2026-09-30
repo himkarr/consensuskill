@@ -95,7 +95,7 @@ jobs:
           python -m uvicorn engine.engine:app --host 127.0.0.1 --port 8001 --log-level warning > /tmp/engine.log 2>&1 &
           python -m uvicorn gateway.app.main:app --host 127.0.0.1 --port 8000 --log-level warning > /tmp/gateway.log 2>&1 &
           npm --prefix frontend run build
-          npm --prefix frontend run preview > /tmp/preview.log 2>&1 &
+          npm --prefix frontend run preview -- --host 127.0.0.1 --strictPort > /tmp/preview.log 2>&1 &
           for i in $(seq 1 60); do
             curl -sf http://127.0.0.1:8000/health >/dev/null &&
             curl -sf http://127.0.0.1:8001/health >/dev/null &&
@@ -108,7 +108,12 @@ jobs:
         run: npm run smoke
       - name: Diagnostics on failure
         if: failure()
-        run: tail -n 100 /tmp/engine.log /tmp/gateway.log /tmp/preview.log || true
+        run: |
+          tail -n 100 /tmp/engine.log /tmp/gateway.log /tmp/preview.log || true
+          echo "--- listeners ---"
+          ss -ltnp | grep -E ':(4173|8000|8001)\s' || true
+          echo "--- processes ---"
+          ps aux | grep -E 'vite|uvicorn|preview' | grep -v grep || true
 
   stack-e2e:
     name: docker compose stack + browser smoke
