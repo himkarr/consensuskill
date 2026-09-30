@@ -4,6 +4,11 @@
 #   open http://localhost:8080
 #   docker compose up --build --scale gateway=3   # more socket replicas
 #
+# Image names are overridable so the same file deploys the CI-published
+# images on a VM (deploy/vm-deploy.sh):
+#   BACKEND_IMAGE=ghcr.io/<owner>/<repo>/backend:<sha> \
+#   WEB_IMAGE=ghcr.io/<owner>/<repo>/web:<sha> docker compose up -d --no-build
+#
 # Redis is deliberately ephemeral (no volume): matches production, where a
 # restart just means an unfinished match disappears.
 name: consensuskill
@@ -19,7 +24,7 @@ services:
       retries: 5
 
   gateway:
-    image: consensuskill-backend:local
+    image: ${BACKEND_IMAGE:-consensuskill-backend:local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -48,7 +53,7 @@ services:
       retries: 5
 
   engine:
-    image: consensuskill-backend:local
+    image: ${BACKEND_IMAGE:-consensuskill-backend:local}
     build:
       context: .
       dockerfile: Dockerfile
@@ -75,6 +80,7 @@ services:
       retries: 5
 
   web:
+    image: ${WEB_IMAGE:-consensuskill-web:local}
     build:
       context: .
       dockerfile: frontend/Dockerfile
