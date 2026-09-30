@@ -1,0 +1,144 @@
+# CD pipeline: gate -> ghcr.io images -> deploy (VM via SSH, Render via hook).
+#
+# Deploy targets are opt-in through repository secrets (both can be enabled):
+#   SSH_HOST, SSH_USER, SSH_PORT?, SSH_PRIVATE_KEY   -> rsync + deploy/vm-deploy.sh
+#   GHCR_TOKEN?                                      -> VM pulls private packages
+#   RENDER_DEPLOY_HOOK?                              -> POST to trigger a Render deploy
+#
+# PR/push quality gating lives in ci.yml; to block merges, mark the `ci`
+# checks as required in the repo's branch protection rules.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false # never cancel a half-finished deploy
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  gate:
+    name: lint + mandatory tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Lint
+        run: ruff check .
+      # The four assessment-mandated tests are part of this suite:
+      #   GET /health 200            -> tests/test_engine.py, tests/test_gateway.py
+      #   join_room unique tokens    -> tests/test_rules.py
+      #   compute_minority (split/tie/unanimous/AFK) -> tests/test_minority.py
+      #   submit_vote dup/late       -> tests/test_engine.py
+      # A failure here fails the whole workflow, so nothing deploys.
+      - name: Tests (76 pytest)
+        run: pytest -q -o faulthandler_timeout=60
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Frontend typecheck + unit tests
+        run: |
+          npm --prefix frontend ci
+          npm --prefix frontend run typecheck
+          npm --prefix frontend test
+
+  images:
+    name: build + push ghcr.io
+    needs: [gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lowercase image prefix (ghcr.io requires lowercase)
+        id: repo
+        run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push backend (gateway + engine)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ steps.repo.outputs.name }}/backend:${{ github.sha }}
+            ghcr.io/${{ steps.repo.outputs.name }}/backend:latest
+      - name: Build and push web (SPA + nginx LB)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ steps.repo.outputs.name }}/web:${{ github.sha }}
+            ghcr.io/${{ steps.repo.outputs.name }}/web:latest
+
+  deploy-vm:
+    name: deploy to VM (SSH)
+    needs: [images]
+    runs-on: ubuntu-latest
+    env:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+      SSH_PORT: ${{ secrets.SSH_PORT }}
+      SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip notice
+        if: env.SSH_HOST == ''
+        run: echo "SSH_HOST is not set - VM deploy skipped (see details.md §12/§13)."
+      - name: Sync repo and deploy
+        if: env.SSH_HOST != ''
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p "${SSH_PORT:-22}" "$SSH_HOST" >> ~/.ssh/known_hosts
+
+          port="${SSH_PORT:-22}"
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/id_deploy -p $port" \
+            --exclude .git --exclude .venv --exclude node_modules \
+            --exclude .run --exclude .pytest_cache --exclude dist \
+            --exclude shots --exclude '__pycache__' \
+            ./ "$SSH_USER@$SSH_HOST:~/consensuskill/"
+
+          ssh -i ~/.ssh/id_deploy -p "$port" "$SSH_USER@$SSH_HOST" \
+            "cd ~/consensuskill && \
+             BACKEND_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/backend:$GITHUB_SHA \
+             WEB_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/web:$GITHUB_SHA \
+             GHCR_TOKEN='$GHCR_TOKEN' \
+             sh deploy/vm-deploy.sh"
+
+  deploy-render:
+    name: deploy to Render (webhook)
+    needs: [images]
+    runs-on: ubuntu-latest
+    env:
+      RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+    steps:
+      - name: Skip notice
+        if: env.RENDER_DEPLOY_HOOK == ''
+        run: echo "RENDER_DEPLOY_HOOK is not set - Render deploy skipped."
+      - name: Trigger Render deploy
+        if: env.RENDER_DEPLOY_HOOK != ''
+        run: |
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
+          echo "Render deploy hook triggered; Render rebuilds from render.yaml."
