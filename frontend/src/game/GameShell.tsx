@@ -72,11 +72,20 @@ function TopBar({
           </span>
         )}
         <button className="ghost" onClick={() => onView(view === "projector" ? "player" : "projector")}>
-          {view === "projector" ? "Phone view" : "Projector view"}
+          {view === "projector" ? "Phone view" : "Spectator view"}
         </button>
         <span className="muted small instance" title="Gateway instance">
           {game.instanceId}
         </span>
+        {state.you?.is_host && (
+          <button
+            className="ghost tiny"
+            title="Kill this gateway — clients reconnect to a healthy instance (fault-tolerance demo)"
+            onClick={game.actions.killInstance}
+          >
+            simulate drop
+          </button>
+        )}
         <button className="ghost" onClick={game.actions.leave}>
           Leave
         </button>
@@ -161,8 +170,7 @@ function LobbyView({ game, view }: { game: Game; view: ViewMode }) {
 
         <ul className="lobby-list">
           {state.players.map((p) => (
-            <li key={p.id}>
-              <span className={p.connected ? "dot on" : "dot"} />
+            <li key={p.id} title={p.connected ? "Online" : "Disconnected"}>
               <span className="avatar" aria-hidden="true">
                 {p.nickname.slice(0, 1)}
               </span>
@@ -183,11 +191,6 @@ function LobbyView({ game, view }: { game: Game; view: ViewMode }) {
           ))}
         </ul>
 
-        {you?.is_host && (
-          <button className="danger ghost" onClick={() => game.actions.killInstance()}>
-            Simulate gateway crash
-          </button>
-        )}
       </div>
     </div>
   );
@@ -423,7 +426,6 @@ function PlayerGrid({ game }: { game: Game }) {
             <span className="avatar" aria-hidden="true">
               {p.nickname.slice(0, 1)}
             </span>
-            <span className={p.connected ? "dot on" : "dot"} />
             <span className="name">{p.nickname}</span>
             {p.is_host && <span className="badge">host</span>}
             {p.has_voted && state.phase === "VOTE" && <span className="badge voted">✓</span>}

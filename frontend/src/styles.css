@@ -870,20 +870,6 @@ blockquote {
   color: var(--b-on-container);
 }
 
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--md-outline);
-  flex-shrink: 0;
-  box-shadow: 0 0 0 3px rgba(148, 156, 166, 0.12);
-}
-
-.dot.on {
-  background: var(--md-primary);
-  box-shadow: 0 0 0 3px rgba(110, 231, 183, 0.14);
-}
-
 .badge {
   font-size: 0.66rem;
   font-weight: 600;
@@ -1230,6 +1216,12 @@ blockquote {
   flex-direction: column;
 }
 
+/* The player list keeps its natural height — it must never be squeezed
+   below its contents (that made rows spill over the chat card). */
+.players {
+  flex: 0 0 auto;
+}
+
 .players h3,
 .chat h3 {
   margin: 0 0 0.6rem;
@@ -1422,19 +1414,24 @@ blockquote {
   }
 
   .shell-body {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
     padding: 0.6rem;
     gap: 0.6rem;
   }
 
-  .side {
-    order: 2;
+  .stage {
+    flex: 0 0 auto;
+    border-radius: var(--shape-lg);
   }
 
-  .stage {
-    border-radius: var(--shape-lg);
+  .side {
+    flex: 0 0 auto;
+  }
+
+  .shell.view-player .chat-log {
+    max-height: 45vh;
   }
 
   .topbar {
