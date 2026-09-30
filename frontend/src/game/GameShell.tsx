@@ -1,6 +1,12 @@
 import { QRCodeSVG } from "qrcode.react";
-import type { ChatMessage } from "../protocol";
-import { formatCountdown, joinLink, livesEmoji, remainingWithOffset } from "../logic";
+import type { ChatMessage, Choice } from "../protocol";
+import {
+  formatCountdown,
+  joinLink,
+  livesEmoji,
+  remainingWithOffset,
+  sideLabel,
+} from "../logic";
 import type { Game } from "../useGame";
 import { useAutoScroll, useTicker } from "./hooks";
 import { useState } from "react";
@@ -212,12 +218,10 @@ function QuestionView({ game, view }: { game: Game; view: ViewMode }) {
       <h1 className="question-text">{question?.text ?? "…"}</h1>
       <div className="options">
         <div className="option a">
-          <span className="opt-key">A</span>
-          <span>{question?.option_a}</span>
+          <span className="side-word">{question?.option_a}</span>
         </div>
         <div className="option b">
-          <span className="opt-key">B</span>
-          <span>{question?.option_b}</span>
+          <span className="side-word">{question?.option_b}</span>
         </div>
       </div>
     </div>
@@ -259,7 +263,6 @@ function VoteView({ game, view }: { game: Game; view: ViewMode }) {
           disabled={voted}
           onClick={() => game.actions.vote("A")}
         >
-          <span className="opt-key">A</span>
           {question?.option_a}
         </button>
         <button
@@ -267,13 +270,12 @@ function VoteView({ game, view }: { game: Game; view: ViewMode }) {
           disabled={voted}
           onClick={() => game.actions.vote("B")}
         >
-          <span className="opt-key">B</span>
           {question?.option_b}
         </button>
       </div>
       {voted ? (
         <p className="vote-locked">
-          Vote locked: <strong>{you.choice}</strong> — no take-backs.
+          Vote locked: <strong>{sideLabel(you.choice)}</strong> — no take-backs.
         </p>
       ) : (
         <p className="muted small">Only your first vote counts. No take-backs.</p>
@@ -303,7 +305,7 @@ function RevealView({ game, view }: { game: Game; view: ViewMode }) {
           ? "Unanimous — round voided"
           : result?.status === "tie"
             ? "Tie — no lives lost"
-            : `Minority ${result?.minority_side} survives!`}
+            : `The “${sideLabel(result?.minority_side)}” minority survives!`}
       </h2>
 
       <div className="bars">
@@ -338,7 +340,7 @@ function Bar({
   total,
   winner,
 }: {
-  label: string;
+  label: Choice;
   value: number;
   total: number;
   winner: boolean;
@@ -346,7 +348,7 @@ function Bar({
   const pct = Math.round((value / total) * 100);
   return (
     <div className={`bar-row ${winner ? "winner" : ""}`}>
-      <span className="opt-key">{label}</span>
+      <span className="bar-side">{sideLabel(label)}</span>
       <div className="bar-track">
         <div className={`bar-fill ${label.toLowerCase()}`} style={{ width: `${pct}%` }} />
       </div>

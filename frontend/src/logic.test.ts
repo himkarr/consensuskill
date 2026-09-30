@@ -10,6 +10,7 @@ import {
   PHASE_LABEL,
   remainingWithOffset,
   resultHeadline,
+  sideLabel,
 } from "./logic";
 import type { Player, RoundResult, StateMessage } from "./protocol";
 
@@ -101,7 +102,7 @@ describe("resultHeadline", () => {
   };
 
   it("describes a normal round", () => {
-    expect(resultHeadline(base)).toContain("minority B survives");
+    expect(resultHeadline(base)).toContain("minority No survives");
   });
 
   it("describes ties and unanimous voids", () => {
@@ -239,5 +240,14 @@ describe("PHASE_LABEL", () => {
     ] as const) {
       expect(PHASE_LABEL[phase]).toBeTruthy();
     }
+  });
+});
+
+describe("sideLabel", () => {
+  it("maps protocol sides to Yes/No", () => {
+    expect(sideLabel("A")).toBe("Yes");
+    expect(sideLabel("B")).toBe("No");
+    expect(sideLabel(null)).toBe("?");
+    expect(sideLabel()).toBe("?");
   });
 });

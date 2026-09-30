@@ -2,7 +2,7 @@
  * Pure helpers — everything here is unit-tested in clock.test.ts.
  */
 
-import type { Phase, Player, RoundResult, StateMessage } from "./protocol";
+import type { Choice, Phase, Player, RoundResult, StateMessage } from "./protocol";
 
 /** Milliseconds of clock skew between this client and the server. */
 export function clockOffset(serverTime: number, localTime: number): number {
@@ -65,6 +65,12 @@ export function displayOrder(players: Player[], hostId: string): Player[] {
   });
 }
 
+/** Human label for a vote side — the game is binary Yes/No. */
+export function sideLabel(side?: Choice | null): string {
+  if (side == null) return "?";
+  return side === "A" ? "Yes" : "No";
+}
+
 /** Headline for the reveal screen. */
 export function resultHeadline(result: RoundResult | null): string {
   if (!result) return "";
@@ -74,7 +80,9 @@ export function resultHeadline(result: RoundResult | null): string {
     case "tie":
       return "Tie — no lives lost";
     default:
-      return `Majority ${result.majority_side} loses a life — minority ${result.minority_side} survives`;
+      return `Majority ${sideLabel(result.majority_side)} loses a life — minority ${sideLabel(
+        result.minority_side,
+      )} survives`;
   }
 }
 

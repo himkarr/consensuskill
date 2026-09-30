@@ -1,44 +1,244 @@
 {
   "questions": [
-    {"id": "q001", "text": "Which one deserves to survive the purge?", "option_a": "Tea", "option_b": "Coffee"},
-    {"id": "q002", "text": "Pick the better pet for the apocalypse.", "option_a": "Cat", "option_b": "Dog"},
-    {"id": "q003", "text": "Pineapple on pizza: guilty or innocent?", "option_a": "Guilty", "option_b": "Innocent"},
-    {"id": "q004", "text": "The last slice of pizza goes to...", "option_a": "The host", "option_b": "The fastest talker"},
-    {"id": "q005", "text": "Which season should be cancelled forever?", "option_a": "Summer", "option_b": "Winter"},
-    {"id": "q006", "text": "Your flight leaves in 10 minutes. Which do you grab?", "option_a": "Phone", "option_b": "Passport"},
-    {"id": "q007", "text": "Which is the deadlier sin in a group project?", "option_a": "Ghosting", "option_b": "Taking credit"},
-    {"id": "q008", "text": "Ban one forever:", "option_a": "Meetings", "option_b": "Emails"},
-    {"id": "q009", "text": "Who gets the last emoji slot on your phone?", "option_a": "Fire", "option_b": "Skull"},
-    {"id": "q010", "text": "The correct way to eat a cookie:", "option_a": "Dunk it", "option_b": "Straight bite"},
-    {"id": "q011", "text": "Choose your weapon in the duel:", "option_a": "Words", "option_b": "Silence"},
-    {"id": "q012", "text": "Which job would you actually survive?", "option_a": "Pirate", "option_b": "Astronaut"},
-    {"id": "q013", "text": "Which is the greater crime?", "option_a": "Reply-all", "option_b": "Left on read"},
-    {"id": "q014", "text": "The fridge light goes out. Which is scarier?", "option_a": "Dark kitchen", "option_b": "Empty fridge"},
-    {"id": "q015", "text": "You get one. Choose:", "option_a": "Infinite battery", "option_b": "Infinite snacks"},
-    {"id": "q016", "text": "Which song survives the road trip?", "option_a": "The classic", "option_b": "The one nobody knows"},
-    {"id": "q017", "text": "Which would you rather explain to your boss?", "option_a": "Late again", "option_b": "Wrong person"},
-    {"id": "q018", "text": "Choose your betrayal tactic:", "option_a": "Bluff big", "option_b": "Stay quiet"},
-    {"id": "q019", "text": "Which sound ends the friendship?", "option_a": "Chewing loud", "option_b": "Snoring loud"},
-    {"id": "q020", "text": "The correct number of toppings on a burger:", "option_a": "One", "option_b": "Everything"},
-    {"id": "q021", "text": "Which superpower is actually useful in traffic?", "option_a": "Teleport", "option_b": "Read minds"},
-    {"id": "q022", "text": "Pick the better betrayal story:", "option_a": "Stolen fries", "option_b": "Stolen hoodie"},
-    {"id": "q023", "text": "Which one must go from the menu?", "option_a": "Ketchup", "option_b": "Mayo"},
-    {"id": "q024", "text": "Which is the real killer of a party?", "option_a": "Bad music", "option_b": "No snacks"},
-    {"id": "q025", "text": "The only acceptable reply to a 3am text:", "option_a": "?", "option_b": "Seen at 9am"},
-    {"id": "q026", "text": "Which would you sell your group chat out for?", "option_a": "A million", "option_b": "Free pizza for life"},
-    {"id": "q027", "text": "Choose your fate:", "option_a": "Always 5 minutes late", "option_b": "Always 1 hour early"},
-    {"id": "q028", "text": "Which is the bigger lie on a resume?", "option_a": "Excel expert", "option_b": "Team player"},
-    {"id": "q029", "text": "Which would survive a zombie attack?", "option_a": "The introvert", "option_b": "The influencer"},
-    {"id": "q030", "text": "Which one do you trust with your last life?", "option_a": "The quiet one", "option_b": "The confident one"},
-    {"id": "q031", "text": "The correct way to end an argument:", "option_a": "Last word", "option_b": "Walk away"},
-    {"id": "q032", "text": "Which is the greater betrayal in this game?", "option_a": "Voting with the mob", "option_b": "Never voting"},
-    {"id": "q033", "text": "Choose the disaster you can survive:", "option_a": "Monday morning", "option_b": "Sunday night"},
-    {"id": "q034", "text": "Which one wins the talent show?", "option_a": "The loud one", "option_b": "The sneaky one"},
-    {"id": "q035", "text": "Pick the worse roomate habit:", "option_a": "Dishes", "option_b": "Noise"},
-    {"id": "q036", "text": "Which truth hurts more?", "option_a": "Nobody picked you", "option_b": "Everyone picked you"},
-    {"id": "q037", "text": "Which is the correct font size?", "option_a": "12pt", "option_b": "Comic Sans 72"},
-    {"id": "q038", "text": "You are the minority now. Which do you claim?", "option_a": "Always A", "option_b": "Always B"},
-    {"id": "q039", "text": "Which ends the round faster?", "option_a": "Chaos", "option_b": "Order"},
-    {"id": "q040", "text": "Final question: who deserves the win?", "option_a": "The bluffers", "option_b": "The honest"}
+    {
+      "id": "q001",
+      "text": "Should the loudest player be voted out first?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q002",
+      "text": "Pineapple on pizza: allowed or banished?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q003",
+      "text": "Do exes deserve a second chance?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q004",
+      "text": "Is it ever okay to ghost a group chat?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q005",
+      "text": "Summer beats winter — agree?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q006",
+      "text": "Phones at the dinner table: acceptable?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q007",
+      "text": "Taking credit for a team win is fine?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q008",
+      "text": "Meetings could all be emails — yes?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q009",
+      "text": "Sending a meme beats typing actual words?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q010",
+      "text": "Dunking cookies in milk is the correct method?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q011",
+      "text": "Silence wins arguments, not words?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q012",
+      "text": "Pirates would beat astronauts in a fight?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q013",
+      "text": "Reply-all should be illegal?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q014",
+      "text": "Being left on read is worse than being blocked?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q015",
+      "text": "Infinite battery beats infinite snacks?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q016",
+      "text": "The classic song beats the deep cut?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q017",
+      "text": "Being late once ruins your reputation?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q018",
+      "text": "Bluffing big beats staying quiet?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q019",
+      "text": "Loud chewing should be a crime?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q020",
+      "text": "One topping is the max for a burger?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q021",
+      "text": "Teleportation beats mind reading?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q022",
+      "text": "Stealing fries is worse than stealing a hoodie?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q023",
+      "text": "Ketchup belongs on everything?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q024",
+      "text": "Bad music kills a party faster than no snacks?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q025",
+      "text": "Leaving a text on read until morning is okay?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q026",
+      "text": "You would sell out your group chat for a million?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q027",
+      "text": "Always 5 minutes late beats always 1 hour early?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q028",
+      "text": "Team player is the biggest resume lie?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q029",
+      "text": "The introvert survives the zombie attack?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q030",
+      "text": "The quiet one deserves your last life?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q031",
+      "text": "Walking away beats getting the last word?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q032",
+      "text": "Voting with the mob is the real betrayal?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q033",
+      "text": "Monday mornings are worse than Sunday nights?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q034",
+      "text": "The sneaky one wins the talent show?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q035",
+      "text": "Leaving dishes in the sink is the worst roommate habit?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q036",
+      "text": "Everyone picked you hurts more than nobody picked you?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q037",
+      "text": "Comic Sans at 72pt is a valid design choice?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q038",
+      "text": "Always saying Yes is deadlier than always saying No?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q039",
+      "text": "Chaos beats order?",
+      "option_a": "Yes",
+      "option_b": "No"
+    },
+    {
+      "id": "q040",
+      "text": "The bluffers deserve the win more than the honest?",
+      "option_a": "Yes",
+      "option_b": "No"
+    }
   ]
 }

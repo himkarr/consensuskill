@@ -1033,6 +1033,7 @@ blockquote {
   flex: 1 1 250px;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 0.85rem;
   font-size: 1.12rem;
   font-weight: 500;
@@ -1058,28 +1059,11 @@ blockquote {
   border-color: color-mix(in srgb, var(--b) 38%, transparent);
 }
 
-.opt-key {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.1rem;
-  height: 2.1rem;
-  flex-shrink: 0;
-  border-radius: var(--shape-sm);
+/* Binary Yes/No side word (the game has no A/B badges). */
+.side-word {
+  font-size: 1.3rem;
   font-weight: 700;
-  font-size: 1rem;
-  background: var(--md-surface-container-highest);
-  color: var(--md-on-surface);
-}
-
-.option.a .opt-key {
-  background: var(--a-container);
-  color: var(--a-on-container);
-}
-
-.option.b .opt-key {
-  background: var(--b-container);
-  color: var(--b-on-container);
+  letter-spacing: 0.02em;
 }
 
 /* =========================================================================
@@ -1129,16 +1113,6 @@ blockquote {
   border-color: color-mix(in srgb, var(--b) 42%, transparent);
 }
 
-.vote-btn.a .opt-key {
-  background: var(--a-container);
-  color: var(--a-on-container);
-}
-
-.vote-btn.b .opt-key {
-  background: var(--b-container);
-  color: var(--b-on-container);
-}
-
 .vote-btn:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: var(--elev-2);
@@ -1177,11 +1151,6 @@ blockquote {
   color: #40172a;
   opacity: 1;
   box-shadow: var(--elev-2);
-}
-
-.vote-btn.chosen .opt-key {
-  background: rgba(0, 0, 0, 0.16);
-  color: inherit;
 }
 
 .vote-locked {
@@ -1245,6 +1214,14 @@ blockquote {
 .bar-row.winner .bar-track {
   border-color: var(--md-primary);
   box-shadow: 0 0 0 1px var(--md-primary);
+}
+
+.bar-side {
+  min-width: 2.7rem;
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--md-on-surface);
 }
 
 .bar-count {
