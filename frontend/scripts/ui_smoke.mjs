@@ -58,8 +58,9 @@ async function main() {
 
   await guest.fill('input[placeholder="e.g. Fox"]', "GuestOne");
   await guest.click('.home-form button.primary');
-  await guest.waitForSelector(".big-code", { timeout: 10_000 });
-  check("guest sees same room code", ((await guest.locator(".big-code").textContent())?.trim() ?? "") === roomCode);
+  await guest.waitForSelector('.lobby-list li:has-text("GuestOne")', { timeout: 10_000 });
+  check("player lobby hides room code + QR", (await guest.locator(".big-code").count()) === 0);
+  check("player lobby shows waiting quote", await guest.locator(".quote").isVisible());
 
   // A separate context: the same context would auto-reconnect the stored
   // GuestOne token instead of showing the join form.
@@ -68,7 +69,7 @@ async function main() {
   await guest2.goto(`${BASE}/?code=${roomCode}`, { waitUntil: "networkidle" });
   await guest2.fill('input[placeholder="e.g. Fox"]', "GuestTwo");
   await guest2.click('.home-form button.primary');
-  await guest2.waitForSelector(".big-code", { timeout: 10_000 });
+  await guest2.waitForSelector('.lobby-list li:has-text("GuestTwo")', { timeout: 10_000 });
 
   await host.waitForSelector('button:has-text("Start game")', { timeout: 10_000 });
   check("start enabled with 3 players", await host.locator('button:has-text("Start game")').isEnabled());
@@ -120,6 +121,11 @@ async function main() {
   // --- reload resumes the session from the stored token --------------------
   await guest.reload({ waitUntil: "networkidle" });
   await guest.waitForSelector(".shell", { timeout: 10_000 });
+  check("play view hides room code", (await guest.locator(".topbar .room-code").count()) === 0);
+  check("play view hides players", (await guest.locator(".players").count()) === 0);
+
+  // The Play view hides the code; switch to Spectate to read it back.
+  await guest.click('button:has-text("Spectate")');
   const resumedCode = (await guest.locator(".room-code").textContent())?.trim();
   check("reload resumes into the same room", resumedCode === roomCode, resumedCode ?? "");
 

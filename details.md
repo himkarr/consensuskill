@@ -321,7 +321,7 @@ REVEAL 8s · APPLY 5s → **≈48s per round**.
 
 ### Fault tolerance (verified in Phase 2)
 
-1. `POST /admin/kill` (host-only, or `kill_instance` from the lobby UI) → gateway dies.
+1. `POST /admin/kill` (host-only) → gateway dies.
 2. Browsers/bots detect the closed socket, back off (500ms→8s exponential), reconnect.
 3. They replay `{type:"reconnect", token}`; Redis's token index maps it to the room.
 4. Game continues from the same round — lives, votes and chat intact.

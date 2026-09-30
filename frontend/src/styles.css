@@ -803,8 +803,10 @@ blockquote {
   min-height: 0;
 }
 
+/* Play view shares Spectate's two-column grid (stage + side) on desktop;
+   the single-column override that squeezed it was the bug. */
 .shell.view-player .shell-body {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 330px;
 }
 
 .stage {
@@ -1307,7 +1309,8 @@ blockquote {
    ========================================================================= */
 
 .players,
-.chat {
+.chat,
+.quote {
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -1320,7 +1323,8 @@ blockquote {
 }
 
 .players h3,
-.chat h3 {
+.chat h3,
+.quote h3 {
   margin: 0 0 0.6rem;
   font-size: 0.76rem;
   font-weight: 600;
@@ -1351,6 +1355,29 @@ blockquote {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Play-view sidebar: random quote stands in for the hidden player list. */
+.quote {
+  flex: 0 0 auto;
+}
+
+.quote p {
+  margin: 0;
+  font-size: 0.93rem;
+  font-style: italic;
+  line-height: 1.55;
+  color: var(--md-on-surface-variant);
+}
+
+/* Player lobby: the waiting/quote card stands in for the code + QR hero. */
+.lobby .quote {
+  max-width: 380px;
+  text-align: center;
+}
+
+.lobby .quote p:not(.muted) {
+  font-size: 1.05rem;
 }
 
 .chat {
@@ -1528,7 +1555,7 @@ blockquote {
   }
 
   .shell.view-player .chat-log {
-    max-height: 45vh;
+    max-height: 55vh;
   }
 
   .topbar {

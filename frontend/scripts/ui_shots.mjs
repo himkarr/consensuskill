@@ -38,15 +38,15 @@ async function main() {
   const code = (await host.locator(".big-code").textContent())?.trim() ?? "";
   await guest.goto(`${BASE}/?code=${code}`, { waitUntil: "networkidle" });
   await guest.fill('input[placeholder="e.g. Fox"]', "GuestOne");
-  await guest.click(".home-form button.primary");
-  await guest.waitForSelector(".big-code", { timeout: 10_000 });
+  await guest.click('.home-form button.primary');
+  await guest.waitForSelector('.lobby-list li:has-text("GuestOne")', { timeout: 10_000 });
 
   const guest2Ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, deviceScaleFactor: 2 });
   const guest2 = await guest2Ctx.newPage();
   await guest2.goto(`${BASE}/?code=${code}`, { waitUntil: "networkidle" });
   await guest2.fill('input[placeholder="e.g. Fox"]', "GuestTwo");
-  await guest2.click(".home-form button.primary");
-  await guest2.waitForSelector(".big-code", { timeout: 10_000 });
+  await guest2.click('.home-form button.primary');
+  await guest2.waitForSelector('.lobby-list li:has-text("GuestTwo")', { timeout: 10_000 });
 
   await shot(guest, "4-lobby-phone");
   await host.waitForSelector('button:has-text("Start game")', { timeout: 10_000 });

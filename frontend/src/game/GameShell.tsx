@@ -33,7 +33,7 @@ export default function GameShell({ game }: { game: Game }) {
           <PhaseView game={game} view={view} />
         </main>
         <aside className="side">
-          <PlayerGrid game={game} />
+          {view === "projector" && <PlayerGrid game={game} />}
           <ChatPanel game={game} />
         </aside>
       </div>
@@ -59,13 +59,15 @@ function TopBar({
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <button
-          className={`room-code${copied ? " copied" : ""}`}
-          title="Copy room code"
-          onClick={() => copy(state.room_code)}
-        >
-          {state.room_code}
-        </button>
+        {view === "projector" && (
+          <button
+            className={`room-code${copied ? " copied" : ""}`}
+            title="Copy room code"
+            onClick={() => copy(state.room_code)}
+          >
+            {state.room_code}
+          </button>
+        )}
         <span className="phase-pill" data-phase={state.phase}>
           {state.phase.replace("_", " ")}
         </span>
@@ -78,20 +80,11 @@ function TopBar({
           </span>
         )}
         <button className="ghost" onClick={() => onView(view === "projector" ? "player" : "projector")}>
-          {view === "projector" ? "Phone view" : "Spectator view"}
+          {view === "projector" ? "Play" : "Spectate"}
         </button>
         <span className="muted small instance" title="Gateway instance">
           {game.instanceId}
         </span>
-        {state.you?.is_host && (
-          <button
-            className="ghost tiny"
-            title="Kill this gateway — clients reconnect to a healthy instance (fault-tolerance demo)"
-            onClick={game.actions.killInstance}
-          >
-            simulate drop
-          </button>
-        )}
         <button className="ghost" onClick={game.actions.leave}>
           Leave
         </button>
@@ -141,20 +134,24 @@ function LobbyView({ game, view }: { game: Game; view: ViewMode }) {
 
   return (
     <div className="phase lobby">
-      <div className="lobby-hero">
-        <p className="muted">Room code</p>
-        <button
-          className={`big-code${copied ? " copied" : ""}`}
-          title="Copy room code"
-          onClick={() => copy(state.room_code)}
-        >
-          {state.room_code}
-        </button>
-        <div className="qr-card">
-          <QRCodeSVG value={joinUrl} size={view === "projector" ? 200 : 132} bgColor="#f4f6f8" fgColor="#0e1013" level="M" />
+      {view === "projector" ? (
+        <div className="lobby-hero">
+          <p className="muted">Room code</p>
+          <button
+            className={`big-code${copied ? " copied" : ""}`}
+            title="Copy room code"
+            onClick={() => copy(state.room_code)}
+          >
+            {state.room_code}
+          </button>
+          <div className="qr-card">
+            <QRCodeSVG value={joinUrl} size={view === "projector" ? 200 : 132} bgColor="#f4f6f8" fgColor="#0e1013" level="M" />
+          </div>
+          <p className="join-url">{joinUrl}</p>
         </div>
-        <p className="join-url">{joinUrl}</p>
-      </div>
+      ) : (
+        <QuoteCard />
+      )}
 
       <div className="lobby-panel card">
         <h2>
@@ -406,6 +403,30 @@ function GameOverView({ game, view }: { game: Game; view: ViewMode }) {
 // ---------------------------------------------------------------------------
 // Sidebar
 // ---------------------------------------------------------------------------
+
+/** Idle filler for the Play view: no player list, just a random line. */
+const QUOTES = [
+  "The safest answer is the one nobody remembers.",
+  "A confident lie beats a nervous truth.",
+  "Someone here has already decided. It isn't you.",
+  "Blend in too well and you vanish.",
+  "Hesitation is a vote you haven't cast yet.",
+  "The quiet ones are the loudest threat.",
+  "Everybody agrees? Somebody is lying.",
+  "Doubt is free — a life costs one round.",
+];
+
+function QuoteCard() {
+  const [quote] = useState(() => QUOTES[Math.floor(Math.random() * QUOTES.length)]);
+  return (
+    <section className="quote card">
+      <h3>While you wait</h3>
+      <p>{quote}</p>
+      <p className="muted small">Switch to Spectate to share the room code.</p>
+    </section>
+  );
+}
+
 function PlayerGrid({ game }: { game: Game }) {
   const state = game.state!;
   const you = state.you;
