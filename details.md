@@ -512,14 +512,17 @@ it automatically — export them or pass them to your process manager.
 | `ENGINE_RESCAN_SECONDS` | `30` | deadline-cache rescan cadence |
 | `ENGINE_IDLE_TICK_SECONDS` | `60` | rescan cadence while no rooms exist |
 | `ENGINE_SWEEP_SECONDS` | `300` | empty-room sweeper |
+| `SUPABASE_DB_URL` | unset | question bank via direct Postgres (preferred; else REST, else JSON) |
 | `SUPABASE_URL` / `SUPABASE_KEY` | unset | question bank via REST (else JSON bank) |
 | `SUPABASE_SERVICE_KEY` | unset | `scripts/seed_supabase.py` only (keep out of git) |
 | `VITE_GATEWAY_URL` | `http://127.0.0.1:8000` | Vite proxy target (dev/preview) |
 | `VITE_WS_URL` | same-origin `/ws` | explicit WS override (needed on Vercel) |
 | `SMOKE_URL` | `http://127.0.0.1:4173` | base URL for the Playwright smoke test |
 
-`.env` holds the Supabase DSN and is gitignored; nothing loads it automatically
-(the Supabase question loader reads `SUPABASE_URL`/`SUPABASE_KEY` from the process env).
+`.env` holds the Supabase DSN and is gitignored; `scripts/dev.sh` sources it
+automatically for local services. The question loader reads `SUPABASE_DB_URL`
+(direct Postgres) or `SUPABASE_URL`/`SUPABASE_KEY` (REST) from the process
+env and always falls back to `data/questions.json` on any failure.
 
 ---
 
@@ -672,9 +675,12 @@ checks as required in GitHub branch protection (repo setting, not a file).
 #    REDIS_URL -> deploy; watch /health go green.
 # 4. Vercel (vercel.com): import the repo (vercel.json is picked up) -> set
 #    VITE_WS_URL=wss://<your-render-service>.onrender.com/ws -> deploy.
-# 5. Optional Supabase: run supabase/questions.sql in the SQL editor, then
-#    SUPABASE_URL=… SUPABASE_SERVICE_KEY=… python scripts/seed_supabase.py;
-#    add SUPABASE_URL + SUPABASE_KEY to the Render environment.
+# 5. Optional Supabase (question bank): easiest via Postgres -
+#    SUPABASE_DB_URL=postgresql://… python scripts/seed_supabase.py
+#    (creates + seeds the table; IPv4-only hosts use the pooler form,
+#    see .env.example) then add SUPABASE_DB_URL to the Render environment.
+#    REST alternative: run supabase/questions.sql, seed with
+#    SUPABASE_URL=… SUPABASE_SERVICE_KEY=…, set SUPABASE_URL + SUPABASE_KEY.
 ```
 
 ---
