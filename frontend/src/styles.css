@@ -463,24 +463,148 @@ blockquote {
   gap: 1.6rem;
 }
 
+/* Full-screen frame for the margin doodles; the form column sits above it
+   and stays centered regardless of the decorations. */
+.home-page {
+  position: relative;
+  flex: 1;
+}
+
+.decor {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.home {
+  position: relative;
+  z-index: 1;
+}
+
+.decor-item {
+  position: absolute;
+  opacity: 0.9;
+}
+
+.decor .ink {
+  stroke: var(--md-muted);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.5;
+}
+
+.decor .ink-mint {
+  stroke: var(--md-primary);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.75;
+}
+
+.decor-label {
+  fill: var(--md-muted);
+  font-size: 15px;
+  font-style: italic;
+  letter-spacing: 0.02em;
+}
+
+.decor-key {
+  fill: var(--md-muted);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.decor-tally {
+  top: 7vh;
+  left: 4vw;
+  width: 110px;
+  transform: rotate(-6deg);
+}
+
+.decor-arrow {
+  top: 36%;
+  right: 3vw;
+  width: 175px;
+  transform: rotate(-3deg);
+}
+
+.decor-crowd {
+  bottom: 6vh;
+  left: 4vw;
+  width: 220px;
+  transform: rotate(-2deg);
+}
+
+.decor-crowd .doodle {
+  width: 100%;
+  margin: 0;
+}
+
+.decor-ballot {
+  bottom: 7vh;
+  right: 5vw;
+  width: 132px;
+  transform: rotate(4deg);
+}
+
+@media (max-width: 1024px) {
+  .decor {
+    display: none;
+  }
+}
+
 .home-hero {
   text-align: center;
 }
 
-.home-hero::after {
-  content: "";
+.doodle {
   display: block;
-  width: 56px;
-  height: 4px;
-  margin: 1.1rem auto 0;
-  border-radius: var(--shape-full);
-  background: linear-gradient(
-    90deg,
-    var(--md-primary),
-    var(--md-secondary),
-    var(--b)
-  );
-  opacity: 0.85;
+  width: min(232px, 72%);
+  height: auto;
+  margin: 0 auto 0.9rem;
+}
+
+.doodle g {
+  stroke: var(--md-muted);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.75;
+}
+
+.doodle g.minority {
+  stroke: var(--md-primary);
+  opacity: 1;
+}
+
+.doodle .spark {
+  stroke: var(--md-primary);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+}
+
+.doodle .ground {
+  stroke: var(--md-outline-variant);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.squiggle {
+  display: block;
+  width: 140px;
+  margin: 0.4rem auto 0;
+  color: var(--md-primary);
+}
+
+.home-note {
+  margin: 0.95rem 0 0;
+  font-size: 0.84rem;
+  font-style: italic;
+  color: var(--md-muted);
+  transform: rotate(-0.5deg);
 }
 
 .home-form {
