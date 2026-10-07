@@ -42,6 +42,9 @@ APP_NAME="${APP_NAME:-ck-app}"
 REGION_CANDIDATES="${REGION_CANDIDATES:-${LOCATION:-} koreacentral eastasia centralindia southindia southeastasia westus2 northeurope westeurope japaneast canadacentral ukwest}"
 LOCATION=""
 LAW_NAME="${LAW_NAME:-ck-log}"
+# ConsumptionOnly (free Consumption plan) is required: sidecar containers are
+# unsupported in an Express environment.
+ENV_MODE="${ENV_MODE:-ConsumptionOnly}"
 # Public image published by .github/workflows/deploy.yml (anonymous GHCR pull).
 # Point it at your own registry, or build it with deploy/azure/build.sh.
 IMAGE="${IMAGE:-ghcr.io/himkarr/consensuskill/web-app:latest}"
@@ -130,8 +133,14 @@ create_env() {
     [ -n "$id" ] || return 1
   fi
 
+  # --environment-mode ConsumptionOnly, NOT the current CLI default. The default
+  # is an Express environment, which forbids sidecar containers outright
+  # (ExpressEnvironmentFeatureNotSupported) and also has no TCP ingress or
+  # internal service discovery - so neither a Redis sidecar nor a separate Redis
+  # app could work there. ConsumptionOnly is still the free Consumption plan.
   if ! err=$(az containerapp env create \
         --name "$ENV_NAME" --resource-group "$RG" --location "$region" \
+        --environment-mode "$ENV_MODE" \
         --logs-workspace-id "$id" --logs-workspace-key "$key" \
         --output none 2>&1); then
     ENV_ERROR="$err"
@@ -150,7 +159,19 @@ az group create --name "$RG" --location "$GROUP_LOCATION" --output none
 if env_exists; then
   log "Container Apps environment $ENV_NAME"
   LOCATION="$(az containerapp env show -n "$ENV_NAME" -g "$RG" --query location -o tsv)"
-  echo "already exists in $LOCATION - keeping it"
+  mode="$(az containerapp env show -n "$ENV_NAME" -g "$RG" --query properties.environmentMode -o tsv 2>/dev/null || true)"
+  if [ -z "$mode" ] || [ "$mode" = "null" ]; then mode="(classic)"; fi
+  echo "already exists in $LOCATION, mode $mode - keeping it"
+  if printf '%s' "$mode" | grep -qi express; then
+    die "this environment is an Express environment, which does not support
+    sidecar containers (and has no TCP ingress or internal service discovery),
+    so the Redis sidecar cannot be deployed into it. Express and Standard
+    environment modes cannot be converted. Recreate it:
+
+      az containerapp env delete -g $RG -n $ENV_NAME --yes --force
+      $0
+    (the script re-creates it with --environment-mode $ENV_MODE)"
+  fi
 else
   log "Finding a region this subscription allows"
   LOCATION=""
