@@ -62,20 +62,62 @@ done
 log "Resource group $RG ($LOCATION)"
 az group create --name "$RG" --location "$LOCATION" --output none
 
+env_exists() {
+  az containerapp env show --name "$ENV_NAME" --resource-group "$RG" >/dev/null 2>&1
+}
+
+create_env() {
+  # $1 = region. Returns non-zero (and explains) if this region is refused.
+  local region="$1" err
+  if ! err=$(az containerapp env create \
+        --name "$ENV_NAME" --resource-group "$RG" --location "$region" \
+        --output none 2>&1); then
+    if printf '%s' "$err" | grep -qi 'RequestDisallowedByAzure\|not available\|not eligible\|restricted'; then
+      echo "    $region is not available on this subscription"
+    else
+      echo "$err" | tail -5
+    fi
+    return 1
+  fi
+  echo "    created in $region"
+  return 0
+}
+
 log "Container Apps environment $ENV_NAME"
-if az containerapp env show --name "$ENV_NAME" --resource-group "$RG" >/dev/null 2>&1; then
+if env_exists; then
   echo "already exists - keeping it"
-else
-  az containerapp env create \
-    --name "$ENV_NAME" --resource-group "$RG" --location "$LOCATION" \
-    --output none
+elif ! create_env "$LOCATION"; then
+  # Azure for Students pins a small set of regions per subscription. Fall back
+  # to any region the subscription actually offers rather than dying.
+  echo "retrying with a region this subscription allows..."
+  found=""
+  for candidate in $(az account list-locations \
+      --query "[?not(contains(name, 'preview')) && not(contains(name,'edge'))].name" \
+      -o tsv 2>/dev/null); do
+    [ -n "$candidate" ] || continue
+    printf '  trying %s\n' "$candidate"
+    if create_env "$candidate"; then
+      LOCATION="$candidate"
+      found="$candidate"
+      break
+    fi
+  done
+  [ -n "$found" ] || die "no region available for Container Apps on this subscription.
+    Check the list yourself with:
+      az account list-locations --query \"[?not(contains(name,'preview'))].name\" -o tsv
+    then re-run with: LOCATION=<one-of-them> ./deploy/azure/deploy.sh"
+  log "Using $LOCATION"
+  # The app and its Redis sidecar must live in the environment's region.
+  az group create --name "$RG" --location "$LOCATION" --output none
 fi
 # The public edge closes idle HTTP requests after 4 minutes by default. Live
 # sockets are safe (the gateway pings every 30s), but bump it anyway so a slow
 # room is never killed by the platform.
+# On a Consumption-only environment this switch needs a dedicated workload
+# profile, so a refusal here is informational, not fatal.
 az containerapp env update --name "$ENV_NAME" --resource-group "$RG" \
   --request-idle-timeout 30 --output none 2>/dev/null || \
-  echo "note: could not raise the environment idle timeout (fine, sockets are pinged)"
+  echo "note: kept the default 4-minute ingress idle timeout (sockets are pinged every 30s)"
 
 log "Deploying $APP_NAME from $IMAGE"
 # -o tsv --query prints just the FQDN; deployment errors still hit stderr.
