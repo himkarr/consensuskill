@@ -35,7 +35,10 @@ APP_NAME="${APP_NAME:-ck-app}"
 # subset of these; the first that accepts a Log Analytics workspace wins.
 # eastasia is early on purpose - it is commonly allowed where India regions are
 # not, and it is the closest allowed region to Delhi.
-REGION_CANDIDATES="${REGION_CANDIDATES:-${LOCATION:-} eastasia centralindia southindia southeastasia westus2 eastus northeurope westeurope japaneast canadacentral ukwest}"
+# Order matters: koreacentral is the one region confirmed to accept a workspace on
+# this subscription (the others return RequestDisallowedByAzure). An explicit
+# LOCATION= is always tried first.
+REGION_CANDIDATES="${REGION_CANDIDATES:-${LOCATION:-} koreacentral eastasia centralindia southindia southeastasia westus2 northeurope westeurope japaneast canadacentral ukwest}"
 LOCATION=""
 LAW_NAME="${LAW_NAME:-ck-log}"
 # Public image published by .github/workflows/deploy.yml (anonymous GHCR pull).
@@ -92,9 +95,13 @@ law_key() {
 # The workspace lives in $RG, whose own location is only metadata - Azure lets
 # resources sit in regions other than the group's.
 region_works() {
-  local region="$1" probe="probe$$$RANDOM"
-  az monitor log-analytics workspace create -g "$RG" -n "$probe" -l "$region" \
-    --retention-in-days 7 --output none >/dev/null 2>&1 || return 1
+  local region="$1" probe err
+  probe="ck-probe-$(head -c 6 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  if ! err=$(az monitor log-analytics workspace create -g "$RG" -n "$probe" -l "$region" 2>&1); then
+    # Surface why. "refused" with no reason has cost us three round trips.
+    PROBE_ERROR="$(printf '%s' "$err" | grep -m1 -E '^(Code|[A-Za-z]+\(.*\)):|Message:' | tr -d '\r')"
+    return 1
+  fi
   az monitor log-analytics workspace delete -g "$RG" -n "$probe" --yes >/dev/null 2>&1 || true
   return 0
 }
@@ -139,13 +146,14 @@ else
   LOCATION=""
   for candidate in $REGION_CANDIDATES; do
     if [ -z "$candidate" ]; then continue; fi
+    PROBE_ERROR=""
     printf '  %-16s ' "$candidate"
     if region_works "$candidate"; then
       echo "available"
       LOCATION="$candidate"
       break
     fi
-    echo "refused"
+    echo "refused${PROBE_ERROR:+ - $PROBE_ERROR}"
   done
   [ -n "$LOCATION" ] || die "no region on this subscription accepts a Log Analytics workspace.
     Azure for Students restricts which regions you can deploy into, and the
