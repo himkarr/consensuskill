@@ -35,6 +35,8 @@ jobs:
           print("vercel.json: ok")
           json.load(open("deploy/azure/containerapp.json"))
           print("deploy/azure/containerapp.json: ok")
+          json.load(open("deploy/azure/environment.json"))
+          print("deploy/azure/environment.json: ok")
           EOF
       - name: Tests
         run: pytest -q -o faulthandler_timeout=60

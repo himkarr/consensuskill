@@ -72,7 +72,9 @@ az account show >/dev/null 2>&1 || die "run 'az login' first"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATE="$HERE/containerapp.json"
+ENV_TEMPLATE="$HERE/environment.json"
 [ -f "$TEMPLATE" ] || die "missing template $TEMPLATE"
+[ -f "$ENV_TEMPLATE" ] || die "missing template $ENV_TEMPLATE"
 
 log "Using subscription $(az account show --query name -o tsv)"
 
@@ -135,15 +137,23 @@ create_env() {
     [ -n "$id" ] || return 1
   fi
 
-  # --environment-mode ConsumptionOnly, NOT the current CLI default. The default
-  # is an Express environment, which forbids sidecar containers outright
-  # (ExpressEnvironmentFeatureNotSupported) and also has no TCP ingress or
-  # internal service discovery - so neither a Redis sidecar nor a separate Redis
-  # app could work there. ConsumptionOnly is still the free Consumption plan.
-  if ! err=$(az containerapp env create \
-        --name "$ENV_NAME" --resource-group "$RG" --location "$region" \
-        --environment-mode "$ENV_MODE" \
-        --logs-workspace-id "$id" --logs-workspace-key "$key" \
+  # Create the environment from an ARM template rather than
+  # 'az containerapp env create --environment-mode': that flag only exists in
+  # newer containerapp CLI extensions, and older ones silently create an Express
+  # environment instead, which forbids sidecar containers and has no TCP ingress
+  # or internal service discovery - so neither a Redis sidecar nor a separate
+  # Redis app can work there. environmentMode is a plain ARM property, so this
+  # works on any CLI version. ConsumptionOnly is still the free Consumption plan.
+  if ! err=$(az deployment group create \
+        --resource-group "$RG" \
+        --name "ck-env-$(date +%s)" \
+        --template-file "$ENV_TEMPLATE" \
+        --parameters \
+            envName="$ENV_NAME" \
+            location="$region" \
+            environmentMode="$ENV_MODE" \
+            logsWorkspaceId="$id" \
+            logsWorkspaceKey="$key" \
         --output none 2>&1); then
     ENV_ERROR="$err"
     return 1

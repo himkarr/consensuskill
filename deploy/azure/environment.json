@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "envName": { "type": "string" },
+    "location": { "type": "string" },
+    "environmentMode": {
+      "type": "string",
+      "defaultValue": "ConsumptionOnly",
+      "metadata": {
+        "description": "ConsumptionOnly is required: an Express environment forbids sidecar containers, which is how Redis reaches the gateway."
+      }
+    },
+    "logsWorkspaceId": { "type": "string" },
+    "logsWorkspaceKey": { "type": "securestring" }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.App/managedEnvironments",
+      "apiVersion": "2024-03-01",
+      "name": "[parameters('envName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "environmentMode": "[parameters('environmentMode')]",
+        "appLogsConfiguration": {
+          "destination": "log-analytics",
+          "logAnalyticsConfiguration": {
+            "customerId": "[parameters('logsWorkspaceId')]",
+            "sharedKey": "[parameters('logsWorkspaceKey')]"
+          }
+        }
+      }
+    }
+  ]
+}
