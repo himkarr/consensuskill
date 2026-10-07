@@ -154,7 +154,7 @@
               "probes": [
                 {
                   "type": "Readiness",
-                  "exec": { "command": ["/bin/sh", "-c", "redis-cli ping | grep -q PONG"] },
+                  "tcpSocket": { "port": 6379 },
                   "initialDelaySeconds": 3,
                   "periodSeconds": 10,
                   "timeoutSeconds": 3,
