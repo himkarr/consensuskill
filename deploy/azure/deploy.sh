@@ -114,10 +114,12 @@ create_env() {
 
   if [ -z "$id" ] || [ -z "$key" ]; then
     log "Log Analytics workspace $LAW_NAME ($region)"
-    # 7 days of retention, and a hard daily cap so a noisy demo can never turn
-    # into a bill. Ingestion for this workload is a few MB/day at most.
+    # 7 days of retention keeps ingestion near-free at this scale. Note the flag
+    # is --retention-time: this command verb has no --retention-in-days and no
+    # --daily-quota-gb, which is why an earlier revision died with
+    # "unrecognized arguments".
     az monitor log-analytics workspace create -g "$RG" -n "$LAW_NAME" -l "$region" \
-      --retention-in-days 7 --daily-quota-gb 0.1 --output none
+      --retention-time 7 --output none
     id="$(law_id)"
     key="$(law_key)"
     [ -n "$id" ] || return 1
