@@ -108,27 +108,29 @@ region_works() {
 
 # Create the environment, reusing or provisioning the workspace in $1.
 create_env() {
-  local region="$1" id key
+  local region="$1" id key err
   id="$(law_id)"
   key="$(law_key)"
 
   if [ -z "$id" ] || [ -z "$key" ]; then
     log "Log Analytics workspace $LAW_NAME ($region)"
-    # 7 days of retention keeps ingestion near-free at this scale. Note the flag
-    # is --retention-time: this command verb has no --retention-in-days and no
-    # --daily-quota-gb, which is why an earlier revision died with
-    # "unrecognized arguments".
+    # No retention flag: student subscriptions land on the Free SKU, which
+    # rejects --retention-time outright ("doesn't match the SKU limits"), and
+    # the default is fine - this workload ingests a few MB/day.
     az monitor log-analytics workspace create -g "$RG" -n "$LAW_NAME" -l "$region" \
-      --retention-time 7 --output none
+      --output none
     id="$(law_id)"
     key="$(law_key)"
     [ -n "$id" ] || return 1
   fi
 
-  az containerapp env create \
-    --name "$ENV_NAME" --resource-group "$RG" --location "$region" \
-    --logs-workspace-id "$id" --logs-workspace-key "$key" \
-    --output none 2>&1 | tail -5
+  if ! err=$(az containerapp env create \
+        --name "$ENV_NAME" --resource-group "$RG" --location "$region" \
+        --logs-workspace-id "$id" --logs-workspace-key "$key" \
+        --output none 2>&1); then
+    ENV_ERROR="$err"
+    return 1
+  fi
   az containerapp env show --name "$ENV_NAME" --resource-group "$RG" \
     --query name -o tsv >/dev/null 2>&1
 }
@@ -164,9 +166,8 @@ else
 
   log "Container Apps environment $ENV_NAME in $LOCATION"
   if ! create_env "$LOCATION"; then
-    die "the environment was refused in $LOCATION even though a workspace was
-    accepted there. Container Apps may not be offered in that region - re-run
-    with REGION_CANDIDATES=\"<other> <other>\" to try others."
+    die "could not create the Container Apps environment in $LOCATION:
+$ENV_ERROR"
   fi
   echo "    created"
 fi
