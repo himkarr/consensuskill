@@ -26,6 +26,7 @@
 #
 # Override anything through the environment, e.g.
 #   ADMIN_TOKEN=$(openssl rand -hex 16) ./deploy/azure/deploy.sh
+#   MIN_REPLICAS=1 ./deploy/azure/deploy.sh          # warm the app before a demo
 set -euo pipefail
 
 RG="${RG:-ck-rg}"
@@ -52,6 +53,11 @@ ADMIN_TOKEN="${ADMIN_TOKEN:-}"
 REGISTRY_SERVER="${REGISTRY_SERVER:-}"
 REGISTRY_USERNAME="${REGISTRY_USERNAME:-}"
 REGISTRY_PASSWORD="${REGISTRY_PASSWORD:-}"
+
+# 0 = scale to zero when nobody is playing (free, but a cold start costs 20-40s).
+# Set MIN_REPLICAS=1 before a live demo so the site is already warm.
+MIN_REPLICAS="${MIN_REPLICAS:-0}"
+MAX_REPLICAS="${MAX_REPLICAS:-1}"
 
 log() { printf '\n\033[1;36m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
@@ -196,6 +202,8 @@ if ! FQDN=$(az deployment group create \
       registryServer="$REGISTRY_SERVER" \
       registryUsername="$REGISTRY_USERNAME" \
       registryPassword="$REGISTRY_PASSWORD" \
+      minReplicas="$MIN_REPLICAS" \
+      maxReplicas="$MAX_REPLICAS" \
   --query properties.outputs.fqdn.value \
   --output tsv); then
   die "deployment failed - re-run with: az deployment group create --resource-group $RG --template-file $TEMPLATE --verbose"

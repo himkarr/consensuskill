@@ -189,3 +189,16 @@ deployed.
 | `/health` returns `"redis": false` | the sidecar is not up: `az containerapp logs show -g ck-rg -n ck-app --container redis --tail 50`. |
 | Room dies after a few idle minutes | a proxy in front is closing silent sockets; the gateway already pings every 30s (`WS_PING_SECONDS`), so raise the environment idle timeout: `az containerapp env update -g ck-rg -n ck-env --request-idle-timeout 30`. |
 | First request after a break takes 30s | normal: the app scaled to zero. Lower nothing; raise `minReplicas` to 1 only if you want instant cold starts (and accept the cost). |
+
+## Presenting
+
+Scale-to-zero means a 20-40s cold start, and you do not want to stand in front
+of a class waiting for it. Warm the app first:
+
+```bash
+MIN_REPLICAS=1 ./deploy/azure/deploy.sh
+```
+
+That keeps one replica (and its Redis sidecar) running, so the URL opens
+instantly. Afterwards, `MIN_REPLICAS=0 ./deploy/azure/deploy.sh` goes back to
+scale-to-zero.

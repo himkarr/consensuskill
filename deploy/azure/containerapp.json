@@ -168,9 +168,11 @@
             "maxReplicas": "[parameters('maxReplicas')]",
             "rules": [
               {
-                "type": "http",
+                "name": "http-concurrency",
                 "http": {
-                  "concurrentRequests": 10
+                  "metadata": {
+                    "concurrentRequests": "10"
+                  }
                 }
               }
             ]
