@@ -51,19 +51,22 @@ consensuskill/
 ├── .env                     # Supabase DSN (gitignored)
 ├── .env.example             # every env var, documented
 ├── Dockerfile               # backend image (gateway + engine; one build)
+├── Dockerfile.aca           # single-container image: SPA + gateway + engine, no nginx
 ├── docker-compose.yml       # nginx edge + gateway×2 + engine + redis
 ├── frontend/Dockerfile      # node build stage → nginx image (SPA + LB)
 ├── .dockerignore
-├── render.yaml              # Render blueprint (free tier: 1 web service)
-├── vercel.json              # Vercel static deploy of the SPA
 ├── .github/workflows/
-│   ├── ci.yml               # 4 jobs: backend, frontend, browser smoke, compose e2e
-│   └── deploy.yml           # CD: gate -> ghcr.io push -> VM (SSH) / Render (hook)
+│   ├── ci.yml               # 5 jobs: backend, frontend, browser smoke, ACA image, compose e2e
+│   └── deploy.yml           # CD: gate -> ghcr.io push -> Azure / VM (SSH)
 ├── data/
 │   └── questions.json       # 40-question bank {id,text,option_a,option_b}
 │
 ├── deploy/
-│   ├── render-entry.sh      # manual Render start: embedded engine + Redis tuning
+│   ├── azure/
+│   │   ├── README.md        # the Azure Container Apps guide (start here)
+│   │   ├── deploy.sh        # RG + environment + app + redis sidecar (idempotent)
+│   │   ├── build.sh         # publish the image to ghcr.io or an ACR
+│   │   └── containerapp.json# the container app (2 containers, ingress, scale, probes)
 │   └── vm-deploy.sh         # VM pull + compose up (run by deploy.yml over SSH)
 ├── docker/
 │   └── nginx/default.conf   # SPA + /ws proxy, upstream = gateway replicas
@@ -116,7 +119,7 @@ consensuskill/
 │   ├── seed_supabase.py     # load data/questions.json into Supabase
 │   └── smoke_upstash.py     # verify a hosted Redis supports every command we use
 │
-├── tests/                   # 76 pytest tests
+├── tests/                   # 83 pytest tests
 │   ├── conftest.py          # make_room / vote_room fixtures
 │   ├── test_rules.py        # 23 — pure rules
 │   ├── test_minority.py     # 13 — compute_minority / check_winner
@@ -280,7 +283,7 @@ dead → `GAME_OVER` with `winners: []` (draw).
 * **HTTP** — `GET /health` returns `instance_id`, `processed`, `questions`, `redis` state.
 * **Single-process mode** — `EMBEDDED_ENGINE=1` (or `create_app(embedded_engine=True)`)
   runs all of the above inside the gateway process: used by the test suite and by the
-  free-tier deploy (one Render web service instead of two).
+  Azure deploy (one container app revision instead of two services).
 
 ### 5.4 `engine/timers.py` — phase transitions
 
@@ -472,11 +475,11 @@ Then open <http://127.0.0.1:4173>.
 
 ```bash
 .venv/bin/ruff check .                                  # lint (backend)
-.venv/bin/pytest -q -o faulthandler_timeout=60          # 76 tests
+.venv/bin/pytest -q -o faulthandler_timeout=60          # 83 tests
 cd frontend && npm run typecheck && npm test            # tsc + 14 vitest
 cd frontend && npm run build                            # tsc && vite build
-cd frontend && npm run smoke                            # 21 browser checks (stack must be up)
-sh -n deploy/render-entry.sh && sh -n scripts/dev.sh    # shell scripts parse
+cd frontend && npm run smoke                            # 24 browser checks (stack must be up)
+sh -n deploy/azure/deploy.sh && sh -n deploy/azure/build.sh && sh -n scripts/dev.sh
 REDIS_URL=redis://localhost:6379/0 \
   .venv/bin/python scripts/smoke_upstash.py             # 12/12 command shapes (local Redis)
 ```
@@ -500,14 +503,14 @@ it automatically — export them or pass them to your process manager.
 
 | Variable | Default | Read by |
 |---|---|---|
-| `REDIS_URL` | `redis://localhost:6379/0` | gateway, engine (Upstash: `rediss://…`) |
+| `REDIS_URL` | `redis://localhost:6379/0` | gateway, engine (Azure: the Redis sidecar on `127.0.0.1:6379`) |
 | `INSTANCE_ID` | `gateway-…` / `engine-…` | both (shown in UI + health) |
 | `ALLOWED_ORIGINS` | `*` | gateway CORS |
 | `ADMIN_TOKEN` | unset | guards `POST /admin/kill` |
 | `EMBEDDED_ENGINE` | unset | run the engine inside the gateway process |
 | `ENGINE_BLOCK_MS` | `1000` | `XREADGROUP BLOCK` ms (`0` = no BLOCK, free tier) |
 | `ENGINE_BATCH` | `20` | engine consumer batch |
-| `ENGINE_EMPTY_POLL_DELAY` | `0.05` | safety-net poll after an empty read (30 on Render) |
+| `ENGINE_EMPTY_POLL_DELAY` | `0.05` | safety-net poll after an empty read (0.5 when `ENGINE_BLOCK_MS=0`) |
 | `ENGINE_TICK_SECONDS` | `0.2` | BUSY retry / post-transition re-check sleep |
 | `ENGINE_RESCAN_SECONDS` | `30` | deadline-cache rescan cadence |
 | `ENGINE_IDLE_TICK_SECONDS` | `60` | rescan cadence while no rooms exist |
@@ -516,7 +519,9 @@ it automatically — export them or pass them to your process manager.
 | `SUPABASE_URL` / `SUPABASE_KEY` | unset | question bank via REST (else JSON bank) |
 | `SUPABASE_SERVICE_KEY` | unset | `scripts/seed_supabase.py` only (keep out of git) |
 | `VITE_GATEWAY_URL` | `http://127.0.0.1:8000` | Vite proxy target (dev/preview) |
-| `VITE_WS_URL` | same-origin `/ws` | explicit WS override (needed on Vercel) |
+| `VITE_WS_URL` | same-origin `/ws` | explicit WS override (only for split-host deployments) |
+| `STATIC_DIR` | unset | serve the built SPA from the gateway itself (`GET /` → `index.html`) |
+| `WS_PING_SECONDS` | `30` | server-side WebSocket keepalive ping (0 disables) |
 | `SMOKE_URL` | `http://127.0.0.1:4173` | base URL for the Playwright smoke test |
 
 `.env` holds the Supabase DSN and is gitignored; `scripts/dev.sh` sources it
@@ -544,13 +549,17 @@ env and always falls back to `data/questions.json` on any failure.
 * **Wake channel + deadline-cached timer loop** (Phase 4): `send_action` XADDs
   (with `MAXLEN ~10000`) and pings `ck:wake`; the engine sleeps on that ping instead of
   polling `XREADGROUP`, and the timer loop only touches Redis when a cached deadline
-  passes. A free Upstash (500K cmds/month) stays far under budget while action latency
-  stays instant — the poll is only a 30s safety net.
+  passes. Redis traffic stays an order of magnitude below what naive polling would
+  cost while action latency stays instant — the poll is only a safety net.
 * **One backend image, one deployable process**: gateway and engine are the same
   image with different commands; `EMBEDDED_ENGINE=1` collapses them into one process
-  for free-tier single-service hosts, while compose runs them separately.
-* **nginx is both the static host and the WebSocket load balancer**, so the static
-  site (Vercel) and the self-hosted compose stack share one `/ws` path convention.
+  for single-revision hosts (Azure Container Apps), while compose runs them separately.
+* **nginx is both the static host and the WebSocket load balancer** for the compose
+  profile; the Azure profile drops nginx entirely (`STATIC_DIR`) so one process answers
+  the SPA, the probe and the socket on a single origin.
+* **Redis as a container-app sidecar**: containers in one revision share a network
+  namespace, so `redis://127.0.0.1:6379/0` replaces a managed Redis with no bill and no
+  credential to rotate.
 
 **Limitations / not yet done**
 
@@ -560,18 +569,21 @@ env and always falls back to `data/questions.json` on any failure.
   up, nginx `-t`, browser smoke through the LB) — not by a local `docker compose up`.
 * Postgres/Supabase is only used for the optional question bank; **match outcomes /
   leaderboard are not persisted** (spec item still open).
-* **Render free tier sleeps** after ~15 min without HTTP traffic: sockets drop and the
-  in-memory room set is lost from the process (Redis keeps documents, but a sleeping
-  service can't advance timers) until the next cold start (~1 min). Acceptable for a
-  demo; the client reconnects automatically.
-* **Vercel does not proxy WebSockets**, so the static deployment must set
-  `VITE_WS_URL=wss://<render-host>/ws` at build time; everything else is same-origin.
+* **The Azure container app scales to zero** after ~15 idle minutes (that is what makes
+  it free). The next request pays a cold start of 20-40s and the Redis sidecar comes
+  back empty, so rooms in progress are lost; clients reconnect with their token and the
+  host restarts the round. Set `minReplicas: 1` to trade that for instant wake-ups.
+* **Cloud edges close idle WebSockets** (Azure Container Apps ingress defaults to a
+  4-minute idle request timeout, and other proxies behave the same). A round idles for
+  tens of seconds between phases, so the gateway pings every socket every 30s
+  (`WS_PING_SECONDS`) and the environment's idle timeout is raised to 30 minutes.
 * No sweeper for stale `conns` entries after an abrupt gateway crash; a player's
   `connected` flag refreshes on their next reconnect/action.
 * Rooms with no host leave (players idling in a finished game) persist until the
   sweeper sees an empty roster; `leave` deletes an empty room immediately.
-* Redis has persistence disabled in the local dev script (`--save ''`) and in compose —
-  state is in-memory for the demo (Upstash persists by default on the free tier).
+* Redis has persistence disabled everywhere (`--save '' --appendonly no`, plus a
+  128 MB `noeviction` cap in Azure) — state is in-memory for the demo, matching
+  "a restart just means an unfinished match disappears".
 
 ---
 
@@ -583,7 +595,7 @@ env and always falls back to `data/questions.json` on any failure.
 |---|---|---|---|---|
 | Local processes | `scripts/dev.sh up` | Vite preview :4173 (proxies `/ws`) | engine :8001 + gateway :8000 | local `redis-server` |
 | Containers | `docker compose up --build` | nginx :8080 (SPA + `/ws` LB) | gateway **×2** (scale flag) + engine | `redis:7-alpine`, no volume |
-| Free-tier cloud | see below | Vercel (static) | Render: **one** web service, `EMBEDDED_ENGINE=1` | Upstash free |
+| Azure Container Apps | `./deploy/azure/deploy.sh` | served by FastAPI (`STATIC_DIR`) | **one** app, `EMBEDDED_ENGINE=1`, ingress on :8000 | `redis:7-alpine` sidecar on `127.0.0.1` |
 
 **Container topology** — `frontend/Dockerfile` builds the SPA (its build stage runs
 `tsc --noEmit && vite build`, so a broken type fails the image build) and serves it from
@@ -592,8 +604,8 @@ WebSocket load balancer: `location /ws` proxies to the `gateway` upstream (Docke
 returns one A record per replica). The backend `Dockerfile` is shared by the gateway and
 engine services; compose overrides only the command.
 
-**Free-tier budget math (why Phase 4 changed the engine)** — Upstash free = 500K
-commands/month, and it forbids blocking reads. The Phase 2 code would have spent it:
+**Cost math (why Phase 4 changed the engine)** — the Phase 2 polling loops would
+have burned the free grant (and, on a managed free Redis, the whole command quota):
 
 | Naive loop | Rate | Monthly |
 |---|---|---|
@@ -606,82 +618,104 @@ commands/month, and it forbids blocking reads. The Phase 2 code would have spent
 | deadline rescan (30s with rooms; 60s idle) + empty-room sweep (300s) | ~4,600/day | ~140K |
 | per client action (XADD + wake PUBLISH + XREADGROUP + XACK) | ~4–6/action | traffic |
 
-Idle ≈ **225K/month (~45% of budget)**; the rest is headroom for actual play. With
-`ENGINE_BLOCK_MS=0` the consumer never sends `BLOCK`, which is also the only shape
-Upstash accepts (`BLOCK 0` would mean "block forever" in Redis). Verify against the real
-thing with `scripts/smoke_upstash.py` (12 checks: `XADD MAXLEN`, no-BLOCK
-`XREADGROUP`, `XAUTOCLAIM`, `SET NX PX`, wake Pub/Sub…).
+Idle ≈ **225K commands/month**; the rest is headroom for actual play. The Azure
+profile sets `ENGINE_BLOCK_MS=0` so the consumer never sends `BLOCK` at all (the
+sidecar is a plain `redis-server`, but a non-blocking read plus the wake channel is
+what the wake path was built for, and it keeps one connection free per process).
+Verify the command shapes against any host you pick with
+`scripts/smoke_upstash.py` (12 checks: `XADD MAXLEN`, no-BLOCK `XREADGROUP`,
+`XAUTOCLAIM`, `SET NX PX`, wake Pub/Sub…).
 
-### Free-tier provider matrix (no credit card)
+### Provider matrix
 
-| Piece | Provider | Free tier | Why |
+| Piece | Provider | Cost | Why |
 |---|---|---|---|
-| Static SPA | Vercel | hobby, static only | CDN + preview deploys; **no WS proxy** → set `VITE_WS_URL=wss://<render>/ws` |
-| Backend (gateway+engine) | Render | 750 instance-hours/month | Docker support, `/health` checks, WebSockets; **exactly one service fits** (2×730 > 750) → embedded engine |
-| Redis | Upstash | 256 MB, 500K cmds/month | TLS `rediss://`, no cold start, Pub/Sub + Streams |
-| Question bank (optional) | Supabase | Postgres + REST | `supabase/questions.sql` + `scripts/seed_supabase.py`; app falls back to the JSON bank |
-| Git + CI | GitHub | Actions free (public repos) | `.github/workflows/ci.yml` |
+| App (SPA + gateway + engine) | Azure Container Apps, Consumption | **free grant**: 180,000 vCPU-s + 360,000 GiB-s + 2M requests/month | Any container image, WebSockets on the managed ingress, `/health` probes, **scale to zero**, managed TLS certificate |
+| Redis | `redis:7-alpine` sidecar in the same revision | included in the same vCPU-s | Same network namespace as the app → `127.0.0.1:6379`; nothing exposed, no credential |
+| Question bank (optional) | Supabase | free tier | `supabase/questions.sql` + `scripts/seed_supabase.py`; app falls back to the JSON bank |
+| Images + CI | GitHub Actions → ghcr.io | free (public repo) | `.github/workflows/ci.yml`, `deploy.yml` |
 
-`render.yaml` (blueprint) pins the cost-critical env vars and runs the image CMD
-directly (Render's docker runtime forbids `startCommand`); `deploy/render-entry.sh`
-keeps the same tuning for manual runs. Behaviour to expect on the free tier: Render **sleeps after
-~15 min idle** (~1 min cold start) — active sockets drop and the client reconnects with
-its stored token; rooms live in Redis, but timers only advance while the service is
-awake.
+At 0.75 vCPU (0.5 app + 0.25 redis) the free grant is ~2.7 hours/day of an
+*active* site; `minReplicas: 0` means an idle site bills nothing. What you give up
+versus a dedicated always-on host: a cold start of 20-40s after ~15 idle minutes
+(sockets drop, clients reconnect with their token, and the Redis sidecar returns
+empty so an in-progress round is lost).
+
+`deploy/azure/containerapp.json` pins the cost-critical knobs: one revision with two
+containers, `maxReplicas: 1` (the engine is authoritative and in-process), ingress
+`transport: auto` (**never `http2`** — it refuses WebSocket upgrades), `allowInsecure:
+false` so the browser is always on `wss://`, and `/health` probes for both the app
+and Redis. `deploy/azure/deploy.sh` is idempotent: re-run it to roll a new revision,
+or `az group delete -n ck-rg` to stop paying.
 
 ### CI (`.github/workflows/ci.yml`)
 
-1. **backend** — ruff, config-file parse (`docker-compose.yml`, `render.yaml`,
-   `vercel.json`), 76 pytest (fakeredis, no services needed).
+1. **backend** — ruff, config-file parse (`docker-compose.yml`, `vercel.json`,
+   `deploy/azure/containerapp.json`), 83 pytest (fakeredis, no services needed).
 2. **frontend** — `npm ci`, typecheck, 14 vitest, production build.
 3. **browser-smoke** — real Redis service container + engine + gateway + preview, then
-   the 21-check Playwright suite.
-4. **stack-e2e** — `docker compose config`, builds **both** images, `nginx -t` inside
-   the web image (against a resolvable dummy `gateway` upstream), `compose up --wait`,
-   then the browser smoke test **through the nginx load balancer**.
+   the 24-check Playwright suite.
+4. **aca-image** — builds `Dockerfile.aca`, runs it next to a Redis container with
+   `EMBEDDED_ENGINE=1`, asserts the app serves its own `/`, `/assets/*` and SPA
+   fallback, then runs the browser smoke **against that single origin** (the exact
+   shape Azure runs).
+5. **stack-e2e** — `docker compose config`, builds **both** compose images, `nginx -t`
+   inside the web image (against a resolvable dummy `gateway` upstream),
+   `compose up --wait`, then the browser smoke test **through the nginx load
+   balancer**.
 
 ### CD (`.github/workflows/deploy.yml`)
 
-Runs on every push to `main` (and `workflow_dispatch`), four jobs, each gating the
+Runs on every push to `main` (and `workflow_dispatch`), each job gating the
 next — a red test stops everything before anything is published:
 
-1. **gate** — `ruff check`, the 76-test pytest suite (which contains the four
+1. **gate** — `ruff check`, the 83-test pytest suite (which contains the four
    assessment-mandated tests: `GET /health`, unique join tokens, `compute_minority`
    splits/ties/unanimous/AFK, duplicate/late `submit_vote`) + frontend
    typecheck/vitest. **Failure blocks the deploy.**
-2. **build + push ghcr.io** — `ghcr.io/<owner>/<repo>/backend:<sha|latest>` (gateway +
-   engine image) and `…/web:<sha|latest>` (SPA + nginx), authenticated with the
-   workflow's `GITHUB_TOKEN` (`permissions: packages: write`).
-3. **deploy-vm** (if `SSH_HOST` is set) — `rsync`s the repo to the VM and runs
+2. **images** — pushes three images to ghcr.io with the workflow's `GITHUB_TOKEN`
+   (`permissions: packages: write`): `…/backend` (gateway + engine), `…/web`
+   (SPA + nginx, for compose) and `…/web-app` (`Dockerfile.aca`, the single-container
+   Azure image), each at `:sha` and `:latest`.
+3. **deploy-azure** (if the three `AZURE_*` secrets are set) — `azure/login` with a
+   service principal, then `deploy/azure/deploy.sh` with `IMAGE=…/web-app:$sha`, which
+   rolls a new ACA revision and curls `/health`. The job is bound to the `azure`
+   environment, so you can require manual approval on it.
+4. **deploy-vm** (if `SSH_HOST` is set) — `rsync`s the repo to the VM and runs
    `deploy/vm-deploy.sh`, which logs into ghcr (if `GHCR_TOKEN` is set), `compose pull`s
    the SHA-tagged images, `up -d --no-build --wait` and curls `:8080/health`. The
    compose file takes `BACKEND_IMAGE` / `WEB_IMAGE` overrides, so CI images and local
    `--build` use the same file.
-4. **deploy-render** (if `RENDER_DEPLOY_HOOK` is set) — `POST`s the Render deploy hook;
-   Render rebuilds from `render.yaml` (source build, independent of ghcr).
 
 Repository secrets (all optional; unset → the job logs a skip notice instead of
-failing): `SSH_HOST`, `SSH_USER`, `SSH_PORT?`, `SSH_PRIVATE_KEY`, `GHCR_TOKEN?`,
-`RENDER_DEPLOY_HOOK?`. To make failures block *merges*, mark the `ci` workflow's
-checks as required in GitHub branch protection (repo setting, not a file).
+failing): `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_CLIENT_SECRET`,
+`SSH_HOST`, `SSH_USER`, `SSH_PORT?`, `SSH_PRIVATE_KEY`, `GHCR_TOKEN?`. To make
+failures block *merges*, mark the `ci` workflow's checks as required in GitHub
+branch protection (repo setting, not a file).
+
+Azure pulls the `web-app` package anonymously, so make it **public** once: repo →
+*Packages* → `web-app` → *Settings* → *Change visibility*.
 
 ### First deploy, step by step
 
 ```bash
-# 1. GitHub: push the repo -> all four CI jobs must be green.
-# 2. Upstash (console.upstash.com): create a Redis DB -> copy the rediss:// URL
-#    (optionally run: REDIS_URL=rediss://… python scripts/smoke_upstash.py)
-# 3. Render (dashboard): New + Blueprint -> repo -> paste the Upstash URL into
-#    REDIS_URL -> deploy; watch /health go green.
-# 4. Vercel (vercel.com): import the repo (vercel.json is picked up) -> set
-#    VITE_WS_URL=wss://<your-render-service>.onrender.com/ws -> deploy.
+# 1. Azure CLI: az login   (pick the Azure for Students subscription)
+# 2. GitHub: make the `web-app` package public (Azure pulls it anonymously).
+# 3. Deploy - creates the resource group, the Container Apps environment and
+#    the app (with the Redis sidecar), then waits for /health:
+#      ./deploy/azure/deploy.sh
+#    → https://ck-app.<region>.azurecontainerapps.io
+# 4. Open the URL on a laptop and a phone; the room QR carries the join link.
 # 5. Optional Supabase (question bank): easiest via Postgres -
 #    SUPABASE_DB_URL=postgresql://… python scripts/seed_supabase.py
 #    (creates + seeds the table; IPv4-only hosts use the pooler form,
-#    see .env.example) then add SUPABASE_DB_URL to the Render environment.
+#    see .env.example) then add SUPABASE_DB_URL to the container app's env.
 #    REST alternative: run supabase/questions.sql, seed with
 #    SUPABASE_URL=… SUPABASE_SERVICE_KEY=…, set SUPABASE_URL + SUPABASE_KEY.
 ```
+
+Full guide, cost notes, custom domain and troubleshooting:
+**[`deploy/azure/README.md`](deploy/azure/README.md)**.
 
 ---
 
@@ -691,7 +725,7 @@ checks as required in GitHub branch protection (repo setting, not a file).
 |---|---|---|
 | 1 | Core rules + unit tests | ✅ 36 tests |
 | 2 | Distributed backend (gateway, engine, Redis) | ✅ 64 tests, bot swarm + kill/reconnect PASS |
-| 3 | Frontend (React/Vite/TS, projector + player views) | ✅ typecheck, 14 vitest, build, 21/21 smoke, 11-screen M3 matte redesign |
-| 4 | Docker & orchestration + free-tier deploy configs | ✅ compose/nginx/Render/Vercel/Upstash/Supabase, CI (4 jobs), 76 tests, 21/21 smoke; **local `docker compose up` unverified — no Docker in this env (CI stack-e2e covers it)** |
-| 5 | CI/CD (GitHub Actions → ghcr → VM) | ✅ `deploy.yml`: gate (lint + 76 tests) → ghcr push → VM via SSH (`deploy/vm-deploy.sh`) / Render webhook; **runs only once the repo is on GitHub with secrets — workflow YAML validated, not yet executed** |
+| 3 | Frontend (React/Vite/TS, projector + player views) | ✅ typecheck, 14 vitest, build, 24/24 smoke, 11-screen M3 matte redesign |
+| 4 | Docker & orchestration + Azure deploy | ✅ compose/nginx, `Dockerfile.aca` + `deploy/azure/*`, CI (5 jobs incl. an ACA-image smoke), 83 tests, 24/24 smoke; **local `docker compose up` unverified — no Docker in this env (CI stack-e2e + aca-image cover it)** |
+| 5 | CI/CD (GitHub Actions → ghcr → Azure / VM) | ✅ `deploy.yml`: gate (lint + 83 tests) → ghcr push → Azure Container Apps (`deploy/azure/deploy.sh`) / VM via SSH; **runs only once the repo is on GitHub with secrets — workflow YAML validated, not yet executed** |
 | 6 | README + architecture diagram + talking points | ✅ README: rules, Mermaid + ASCII diagrams, quickstart, 2–3 min presentation script, interview Q&A |

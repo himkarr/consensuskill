@@ -1,0 +1,188 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "appName": {
+      "type": "string",
+      "metadata": { "description": "Container app name; also becomes part of the public FQDN." }
+    },
+    "environmentName": {
+      "type": "string",
+      "metadata": { "description": "Existing Container Apps managed environment." }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    },
+    "image": {
+      "type": "string",
+      "metadata": { "description": "Public image reference (GHCR or Docker Hub) for the single-container app." }
+    },
+    "redisImage": {
+      "type": "string",
+      "defaultValue": "redis:7-alpine"
+    },
+    "allowedOrigins": {
+      "type": "string",
+      "defaultValue": "*"
+    },
+    "adminToken": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": { "description": "Guards POST /admin/kill. Empty = unguarded (fine while STUDENT only)." }
+    },
+    "minReplicas": {
+      "type": "int",
+      "defaultValue": 0,
+      "metadata": { "description": "0 = scale to zero when nobody is playing (billed nothing)." }
+    },
+    "maxReplicas": {
+      "type": "int",
+      "defaultValue": 1,
+      "metadata": { "description": "The round engine is authoritative and in-process, so keep this at 1." }
+    },
+    "targetPort": {
+      "type": "int",
+      "defaultValue": 8000
+    },
+    "registryServer": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": { "description": "Leave empty for public images (GHCR/Docker Hub = anonymous pull)." }
+    },
+    "registryUsername": {
+      "type": "string",
+      "defaultValue": ""
+    },
+    "registryPassword": {
+      "type": "securestring",
+      "defaultValue": ""
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.App/containerApps",
+      "apiVersion": "2024-03-01",
+      "name": "[parameters('appName')]",
+      "location": "[parameters('location')]",
+      "tags": {
+        "app": "consensuskill"
+      },
+      "properties": {
+        "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments', parameters('environmentName'))]",
+        "configuration": {
+          "activeRevisionsMode": "Single",
+          "ingress": {
+            "external": true,
+            "targetPort": "[parameters('targetPort')]",
+            "transport": "auto",
+            "allowInsecure": false,
+            "traffic": [
+              {
+                "latestRevision": true,
+                "weight": 100
+              }
+            ]
+          },
+          "secrets": [
+            "[if(empty(parameters('adminToken')), json('null'), createObject('name', 'admin-token', 'value', parameters('adminToken')))]",
+            "[if(empty(parameters('registryPassword')), json('null'), createObject('name', 'registry-password', 'value', parameters('registryPassword')))]"
+          ],
+          "registries": [
+            "[if(empty(parameters('registryServer')), json('null'), createObject('server', parameters('registryServer'), 'username', parameters('registryUsername'), 'passwordSecretRef', 'registry-password'))]"
+          ]
+        },
+        "template": {
+          "containers": [
+            {
+              "name": "app",
+              "image": "[parameters('image')]",
+              "resources": {
+                "cpu": 0.5,
+                "memory": "1Gi"
+              },
+              "env": [
+                { "name": "REDIS_URL", "value": "redis://127.0.0.1:6379/0" },
+                { "name": "EMBEDDED_ENGINE", "value": "1" },
+                { "name": "ALLOWED_ORIGINS", "value": "[parameters('allowedOrigins')]" },
+                "[if(empty(parameters('adminToken')), json('null'), createObject('name', 'ADMIN_TOKEN', 'secretRef', 'admin-token'))]",
+                { "name": "STATIC_DIR", "value": "/app/static" },
+                { "name": "WS_PING_SECONDS", "value": "30" },
+                { "name": "ENGINE_BLOCK_MS", "value": "0" },
+                { "name": "ENGINE_EMPTY_POLL_DELAY", "value": "0.5" },
+                { "name": "ENGINE_RESCAN_SECONDS", "value": "30" },
+                { "name": "ENGINE_IDLE_TICK_SECONDS", "value": "60" },
+                { "name": "ENGINE_SWEEP_SECONDS", "value": "300" }
+              ],
+              "probes": [
+                {
+                  "type": "Liveness",
+                  "httpGet": { "path": "/health", "port": "[parameters('targetPort')]" },
+                  "initialDelaySeconds": 15,
+                  "periodSeconds": 30,
+                  "timeoutSeconds": 5,
+                  "failureThreshold": 3
+                },
+                {
+                  "type": "Readiness",
+                  "httpGet": { "path": "/health", "port": "[parameters('targetPort')]" },
+                  "initialDelaySeconds": 5,
+                  "periodSeconds": 10,
+                  "timeoutSeconds": 5,
+                  "failureThreshold": 3
+                }
+              ]
+            },
+            {
+              "name": "redis",
+              "image": "[parameters('redisImage')]",
+              "resources": {
+                "cpu": 0.25,
+                "memory": "0.5Gi"
+              },
+              "command": [
+                "redis-server",
+                "--save",
+                "",
+                "--appendonly",
+                "no",
+                "--maxmemory",
+                "128mb",
+                "--maxmemory-policy",
+                "noeviction"
+              ],
+              "probes": [
+                {
+                  "type": "Readiness",
+                  "exec": { "command": ["/bin/sh", "-c", "redis-cli ping | grep -q PONG"] },
+                  "initialDelaySeconds": 3,
+                  "periodSeconds": 10,
+                  "timeoutSeconds": 3,
+                  "failureThreshold": 5
+                }
+              ]
+            }
+          ],
+          "scale": {
+            "minReplicas": "[parameters('minReplicas')]",
+            "maxReplicas": "[parameters('maxReplicas')]",
+            "rules": [
+              {
+                "type": "http",
+                "http": {
+                  "concurrentRequests": 10
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "fqdn": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.App/containerApps', parameters('appName')), '2024-03-01').configuration.ingress.fqdn]"
+    }
+  }
+}

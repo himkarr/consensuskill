@@ -15,11 +15,12 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from redis.asyncio import Redis
 
 from gateway.app import ws as ws_module
@@ -29,9 +30,22 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
+# WebSocket keepalive period. Cloud edges close sockets that go quiet, and a
+# round sits idle for tens of seconds between phases, so the gateway pings on
+# its own. 0 disables it (used by the test-suite, which drives sockets directly).
+DEFAULT_WS_PING_SECONDS = float(os.environ.get("WS_PING_SECONDS", "30"))
+
 
 def default_instance_id() -> str:
     return os.environ.get("INSTANCE_ID") or f"gateway-{uuid.uuid4().hex[:8]}"
+
+
+def spa_root(static_dir: str | None) -> Path | None:
+    """Resolve ``STATIC_DIR`` to its ``index.html``, or None if unusable."""
+    if not static_dir:
+        return None
+    root = Path(static_dir).resolve()
+    return root if (root / "index.html").is_file() else None
 
 
 def create_app(
@@ -41,18 +55,25 @@ def create_app(
     embedded_engine: bool | None = None,
     questions: list | None = None,
     allow_origins: list[str] | None = None,
+    static_dir: str | None = None,
+    ws_ping_seconds: float | None = None,
 ) -> FastAPI:
     """Build the gateway app.
 
     ``embedded_engine=True`` also runs the round engine in this process. It is
     used by the test-suite (one in-process stack against fakeredis), by
-    ``EMBEDDED_ENGINE=1`` local runs, and by free-tier deploys: Render's free
-    plan fits exactly one web service, so gateway + engine share the process
-    and its 750 instance-hours/month.
+    ``EMBEDDED_ENGINE=1`` local runs, and by single-process deploys: Azure
+    Container Apps puts the gateway and the engine in one revision, so they
+    share a process and its scaling.
     """
     instance = instance_id or default_instance_id()
     if embedded_engine is None:
         embedded_engine = os.environ.get("EMBEDDED_ENGINE", "").lower() in {"1", "true", "yes"}
+    if ws_ping_seconds is None:
+        ws_ping_seconds = DEFAULT_WS_PING_SECONDS
+    if static_dir is None:
+        static_dir = os.environ.get("STATIC_DIR", "")
+    bundle = spa_root(static_dir)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -65,6 +86,12 @@ def create_app(
         tasks: list[asyncio.Task] = [
             asyncio.create_task(ws_module.relay_loop(app), name="pubsub-relay")
         ]
+        if ws_ping_seconds and ws_ping_seconds > 0:
+            tasks.append(
+                asyncio.create_task(
+                    ws_module.keepalive_loop(app, ws_ping_seconds), name="ws-keepalive"
+                )
+            )
         app.state.engine = None
         if embedded_engine:
             # Imported lazily so a production gateway never needs engine code.
@@ -120,7 +147,11 @@ def create_app(
     )
 
     @app.get("/")
-    async def root() -> dict[str, Any]:
+    async def root() -> Any:
+        # With a bundle present "/" is the SPA; without one it stays the
+        # service banner (the local compose profile serves the SPA from nginx).
+        if bundle is not None:
+            return FileResponse(bundle / "index.html")
         return {"service": "gateway", "instance_id": instance, "docs": "/docs"}
 
     @app.get("/health")
@@ -160,7 +191,41 @@ def create_app(
     async def websocket_endpoint(ws: WebSocket) -> None:
         await ws_module.handle_connection(app, ws)
 
+    # Mounted last on purpose: a catch-all route registered earlier would
+    # shadow /ws, /health and /admin/kill.
+    mount_spa(app, static_dir)
+
     return app
+
+
+def mount_spa(app: FastAPI, static_dir: str | None) -> None:
+    """Serve the built React bundle from the gateway (optional).
+
+    Set ``STATIC_DIR`` to the directory holding ``index.html``. Every unknown
+    path falls back to ``index.html`` because the app is a single page, so deep
+    links like ``/?code=ABC234`` and any future client route keep working.
+
+    This is what lets a one-container deploy (Azure Container Apps) ship the
+    whole product without a separate nginx hop: the same process answers
+    ``GET /`` for the SPA, ``GET /health`` for the platform probe and
+    ``WS /ws`` for the game.
+    """
+    root = spa_root(static_dir)
+    if root is None:
+        if static_dir:
+            logger.warning("STATIC_DIR=%s has no index.html - not serving the SPA", static_dir)
+        return
+
+    index = root / "index.html"
+    logger.info("serving SPA from %s", root)
+
+    @app.get("/{spa_path:path}", include_in_schema=False)
+    async def spa(spa_path: str) -> FileResponse:
+        # Resolve inside the root only: never let `..` or a symlink escape it.
+        candidate = (root / spa_path).resolve()
+        if candidate.is_relative_to(root) and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(index)
 
 
 app = create_app()

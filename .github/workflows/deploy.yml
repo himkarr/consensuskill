@@ -1,9 +1,12 @@
-# CD pipeline: gate -> ghcr.io images -> deploy (VM via SSH, Render via hook).
+# CD pipeline: gate -> ghcr.io images -> deploy (Azure Container Apps, VM via SSH).
 #
-# Deploy targets are opt-in through repository secrets (both can be enabled):
-#   SSH_HOST, SSH_USER, SSH_PORT?, SSH_PRIVATE_KEY   -> rsync + deploy/vm-deploy.sh
-#   GHCR_TOKEN?                                      -> VM pulls private packages
-#   RENDER_DEPLOY_HOOK?                              -> POST to trigger a Render deploy
+# Deploy targets are opt-in through repository secrets (either can be enabled):
+#   AZURE_CLIENT_ID/AZURE_TENANT_ID/AZURE_CLIENT_SECRET? -> deploy/azure/deploy.sh
+#   SSH_HOST, SSH_USER, SSH_PORT?, SSH_PRIVATE_KEY?      -> rsync + deploy/vm-deploy.sh
+#   GHCR_TOKEN?                                         -> private package pulls
+#
+# Without the Azure secrets the pipeline still builds and publishes the images,
+# so the Azure app can be updated by hand from the console.
 #
 # PR/push quality gating lives in ci.yml; to block merges, mark the `ci`
 # checks as required in the repo's branch protection rules.
@@ -42,7 +45,7 @@ jobs:
       #   compute_minority (split/tie/unanimous/AFK) -> tests/test_minority.py
       #   submit_vote dup/late       -> tests/test_engine.py
       # A failure here fails the whole workflow, so nothing deploys.
-      - name: Tests (76 pytest)
+      - name: Tests (83 pytest)
         run: pytest -q -o faulthandler_timeout=60
       - uses: actions/setup-node@v4
         with:
@@ -87,6 +90,51 @@ jobs:
           tags: |
             ghcr.io/${{ steps.repo.outputs.name }}/web:${{ github.sha }}
             ghcr.io/${{ steps.repo.outputs.name }}/web:latest
+      # Single-container image for Azure Container Apps: SPA served by FastAPI,
+      # round engine embedded, so one revision is the whole product.
+      - name: Build and push web-app (SPA + gateway + engine, no nginx)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.aca
+          push: true
+          tags: |
+            ghcr.io/${{ steps.repo.outputs.name }}/web-app:${{ github.sha }}
+            ghcr.io/${{ steps.repo.outputs.name }}/web-app:latest
+
+  deploy-azure:
+    name: deploy to Azure Container Apps
+    needs: [images]
+    runs-on: ubuntu-latest
+    # A client secret is a secret, so the job waits for review before it can
+    # read it. Mark the environment as required reviewers if you want manual
+    # approval on every production deploy.
+    environment: azure
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          creds: |
+            ${{ secrets.AZURE_CLIENT_ID }}
+            ${{ secrets.AZURE_TENANT_ID }}
+            ${{ secrets.AZURE_CLIENT_SECRET }}
+      - name: Skip notice
+        if: env.AZURE_CLIENT_ID == '' || env.AZURE_TENANT_ID == '' || env.AZURE_CLIENT_SECRET == ''
+        run: echo "Azure service principal secrets are not set - deploy skipped."
+      - name: Deploy the new revision
+        if: env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != '' && env.AZURE_CLIENT_SECRET != ''
+        # ghcr.io needs a lowercase repo path; the package must be public for
+        # Azure to pull it anonymously (see deploy/azure/README.md).
+        run: IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/web-app:${GITHUB_SHA}" ./deploy/azure/deploy.sh
+      - name: Health check
+        if: env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != '' && env.AZURE_CLIENT_SECRET != ''
+        run: |
+          fqdn=$(az containerapp show -g "${RG:-ck-rg}" -n "${APP_NAME:-ck-app}" --query properties.configuration.ingress.fqdn -o tsv)
+          curl -fsS --retry 10 --retry-delay 5 --retry-connrefused "https://$fqdn/health"
 
   deploy-vm:
     name: deploy to VM (SSH)
@@ -126,19 +174,3 @@ jobs:
              WEB_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}/web:$GITHUB_SHA \
              GHCR_TOKEN='$GHCR_TOKEN' \
              sh deploy/vm-deploy.sh"
-
-  deploy-render:
-    name: deploy to Render (webhook)
-    needs: [images]
-    runs-on: ubuntu-latest
-    env:
-      RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
-    steps:
-      - name: Skip notice
-        if: env.RENDER_DEPLOY_HOOK == ''
-        run: echo "RENDER_DEPLOY_HOOK is not set - Render deploy skipped."
-      - name: Trigger Render deploy
-        if: env.RENDER_DEPLOY_HOOK != ''
-        run: |
-          curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
-          echo "Render deploy hook triggered; Render rebuilds from render.yaml."

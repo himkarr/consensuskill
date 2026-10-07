@@ -28,11 +28,13 @@ jobs:
           pip install pyyaml
           python - <<'EOF'
           import json, yaml
-          for path in ("docker-compose.yml", "render.yaml"):
+          for path in ("docker-compose.yml",):
               yaml.safe_load(open(path))
               print(f"{path}: ok")
           json.load(open("vercel.json"))
           print("vercel.json: ok")
+          json.load(open("deploy/azure/containerapp.json"))
+          print("deploy/azure/containerapp.json: ok")
           EOF
       - name: Tests
         run: pytest -q -o faulthandler_timeout=60
@@ -114,6 +116,61 @@ jobs:
           ss -ltnp | grep -E ':(4173|8000|8001)\s' || true
           echo "--- processes ---"
           ps aux | grep -E 'vite|uvicorn|preview' | grep -v grep || true
+
+  # The Azure deploy ships exactly this image: SPA + gateway + round engine in
+  # one container. Building it and driving the real UI through its own port
+  # catches anything the nginx/compose profile would have papered over.
+  aca-image:
+    name: azure image (Dockerfile.aca, single origin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Build the single-container image
+        run: docker build -f Dockerfile.aca -t consensuskill-aca:ci .
+      - name: Start redis + the app
+        run: |
+          docker network create ck-aca
+          docker run -d --name ck-aca-redis --network ck-aca \
+            redis:7-alpine redis-server --save "" --appendonly no
+          for i in $(seq 1 30); do
+            docker exec ck-aca-redis redis-cli ping | grep -q PONG && break
+            sleep 1
+          done
+          docker run -d --name ck-aca-app --network ck-aca -p 8000:8000 \
+            -e REDIS_URL=redis://ck-aca-redis:6379/0 \
+            -e EMBEDDED_ENGINE=1 \
+            -e ALLOWED_ORIGINS='*' \
+            consensuskill-aca:ci
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8000/health >/dev/null && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8000/health
+      - name: The app serves its own SPA
+        run: |
+          curl -sf http://127.0.0.1:8000/ | grep -q '<div id="root">'
+          # Assets resolve from the same origin, and an unknown path falls back
+          # to index.html (SPA routing).
+          asset=$(curl -sf http://127.0.0.1:8000/ | grep -o '/assets/[^"]*\.js' | head -1)
+          curl -sf "http://127.0.0.1:8000$asset" >/dev/null
+          curl -sf http://127.0.0.1:8000/deep/link | grep -q '<div id="root">'
+      - name: Smoke test against the single origin
+        working-directory: frontend
+        run: |
+          npm ci
+          npm exec playwright install --with-deps chromium
+          SMOKE_URL=http://127.0.0.1:8000 npm run smoke
+      - name: Diagnostics on failure
+        if: failure()
+        run: docker logs ck-aca-app || true
+      - name: Tear down
+        if: always()
+        run: docker rm -f ck-aca-app ck-aca-redis || true && docker network rm ck-aca || true
 
   stack-e2e:
     name: docker compose stack + browser smoke

@@ -12,6 +12,7 @@ No game rules live here - see ``engine/rules.py``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -21,7 +22,7 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import TypeAdapter, ValidationError
 
-from gateway.app.models import Connection
+from gateway.app.models import Connection, ConnectionRegistry
 from shared import bus, keys
 from shared.schemas import ClientMessage, build_you, error_message, instance_info_message
 
@@ -128,6 +129,33 @@ async def dispatch(app: Any, conn: Connection, message: Any) -> None:
         action["target_id"] = message.player_id  # who gets removed
 
     await bus.send_action(redis, action)
+
+
+async def keepalive_loop(app: Any, interval: float) -> None:
+    """Ping every live socket on a fixed interval.
+
+    Two reasons this exists:
+
+    * Cloud edges (Azure Container Apps ingress, Cloudflare, Heroku routers)
+      drop WebSocket connections that send nothing for a few minutes. Rooms
+      legitimately sit idle between phases and while players type, so the edge
+      would silently cut them and the game would stall.
+    * It also detects half-open sockets (phone went into a tunnel) long before
+      TCP does, which keeps ``/health`` connection counts honest.
+
+    A ping failure is never fatal: the next client message or send will notice
+    the dead socket and close it through the normal path.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        registry: ConnectionRegistry | None = getattr(app.state, "registry", None)
+        if registry is None:
+            continue
+        for conn in registry.all():
+            try:
+                await conn.ws.ping()
+            except Exception:  # noqa: BLE001 - client vanished mid-ping
+                logger.debug("keepalive ping failed for %s", conn.conn_id)
 
 
 async def relay_loop(app: Any) -> None:

@@ -1,0 +1,43 @@
+# Single-container image for Azure Container Apps: the React bundle is built
+# into the Python runtime and served by FastAPI itself (STATIC_DIR), so one
+# container answers the SPA, the platform probe and the game socket on :8000.
+#
+# The plain `Dockerfile` stays untouched for the compose profile, where nginx
+# serves the SPA and load-balances /ws across N gateway replicas.
+#
+# Build context is the repository root:
+#   docker build -f Dockerfile.aca -t ghcr.io/<owner>/<repo>/web-app:latest .
+FROM node:22-alpine AS build
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    STATIC_DIR=/app/static
+
+WORKDIR /app
+
+COPY requirements.txt ./
+RUN pip install -r requirements.txt
+
+COPY shared/ shared/
+COPY engine/ engine/
+COPY gateway/ gateway/
+COPY data/ data/
+COPY --from=build /app/dist /app/static
+
+RUN useradd --create-home --uid 10001 app
+USER app
+
+EXPOSE 8000
+# The round engine runs in this process (Azure has no free separate worker),
+# which is what EMBEDDED_ENGINE=1 in the container app template switches on.
+CMD ["sh", "-c", "exec uvicorn gateway.app.main:app --host 0.0.0.0 --port ${PORT:-8000} --log-level warning"]

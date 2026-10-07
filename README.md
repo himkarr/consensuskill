@@ -158,8 +158,8 @@ WebSocket upgrades (`docker compose up --scale gateway=3`). Cross-node fan-out r
 Redis Pub/Sub; reconnects ride the token → room index, so a client evicted from
 gateway-1 resumes on gateway-2 with its lives intact. The engine is separately
 scalable and safe to run in-process (`EMBEDDED_ENGINE=1`) when a free tier only fits
-one service. A wake channel + deadline-cached timer loop keeps a hosted Redis (Upstash
-500K commands/month) inside budget.
+one service. A wake channel + deadline-cached timer loop keeps Redis traffic low
+enough for a free grant.
 
 **Fault tolerance demo (verified):** `POST /admin/kill` hard-kills a gateway;
 browsers/bots back off, reconnect, replay `{type:"reconnect", token}` and continue the
@@ -167,19 +167,23 @@ same round — lives, votes and chat intact.
 
 ---
 
-## 5. Deployment (free tier, no credit card)
+## 5. Deployment (Azure Container Apps, free grant)
 
 | Piece | Provider | Notes |
 |---|---|---|
-| Static SPA | Vercel | `vercel.json` at repo root; set `VITE_WS_URL=wss://<render>/ws` |
-| Backend (gateway+engine in one process) | Render | `render.yaml` blueprint (image CMD + env pins); 750 h/month = exactly one service |
-| Redis | Upstash | `rediss://`, 500K cmds/month — engine tuned to stay under it |
+| App (SPA + gateway + engine) | Azure Container Apps, Consumption | `Dockerfile.aca`; FastAPI serves the SPA and upgrades `/ws` on one origin |
+| Redis | Redis sidecar in the same revision | `127.0.0.1:6379`; no managed Redis bill, no password |
 | Question bank (optional) | Supabase | `supabase/questions.sql` + `scripts/seed_supabase.py` |
-| Images + CD | GitHub Actions → ghcr.io → VM | `.github/workflows/deploy.yml` (gate → push → SSH/hook) |
+| Images + CD | GitHub Actions → ghcr.io → ACA | `.github/workflows/deploy.yml` (gate → push → deploy/azure) |
 
-Step-by-step: see **`details.md` §12**. Verify a hosted Redis with
-`python scripts/smoke_upstash.py`. Note: Render's free service sleeps after ~15 min
-idle (sockets drop → clients auto-reconnect).
+```bash
+./deploy/azure/deploy.sh          # creates everything, prints the https URL
+```
+
+One command, one container app, `minReplicas: 0` so an idle site is free, and a
+Microsoft-managed certificate on `*.azurecontainerapps.io`. The 180,000
+vCPU-seconds/month free grant covers normal play. Step-by-step, cost notes and
+alternatives: **`deploy/azure/README.md`**. Deep notes: `details.md` §12.
 
 ---
 
@@ -252,15 +256,17 @@ could flush rounds into Supabase (the optional question-bank integration shows t
 REST path). Currently documented as an open gap.
 
 **What is the cost/efficiency story?**
-Naive polling would burn ~2.6M Redis reads/month on the free tier. Instead: wake
-Pub/Sub on every action, a deadline-cached timer loop with a 30s rescan, non-blocking
-`XREADGROUP` (`BLOCK` is forbidden on Upstash), and `MAXLEN`-trimmed streams —
-~225K commands/month idle, ~45% of budget. Measured reasoning is in `details.md` §12.
+Naive polling would burn ~2.6M Redis reads/month. Instead: wake Pub/Sub on every
+action, a deadline-cached timer loop with a 30s rescan, non-blocking `XREADGROUP`, and
+`MAXLEN`-trimmed streams — ~225K commands/month idle. The whole app is one container
+that scales to zero, so an idle site costs nothing and the 180,000 vCPU-seconds/month
+free grant covers normal play. Measured reasoning is in `details.md` §12.
 
 **Where are the single points of failure?**
-Redis (mitigated by managed Upstash + atomic single-writer design) and the free-tier
-single Render instance (sleeps, cold-starts ~1 min). Gateways and the engine are
-replaceable at any moment; state lives in Redis, not in processes.
+Redis (mitigated by the atomic single-writer design plus `XAUTOCLAIM` rebalancing) and
+the single replica (which scales to zero, so a cold start costs 20-40s and discards
+rooms in progress). The engine is restartable at any moment; state lives in Redis, not
+in processes.
 
 --- -->
 
@@ -272,10 +278,10 @@ consensuskill/
 ├── engine/     pure rules + locks + timers + consumer (authoritative)
 ├── gateway/    stateless WebSocket front door
 ├── frontend/   React SPA (projector + player views), Playwright smoke
-├── deploy/     render-entry.sh (Render), vm-deploy.sh (SSH CD)
+├── deploy/     azure/ (Container Apps deploy + guide), vm-deploy.sh (SSH CD)
 ├── docker/     nginx config (SPA + /ws load balancer)
 ├── scripts/    dev.sh, bot.py, seed_supabase.py, smoke_upstash.py
-├── tests/      76 pytest (rules, minority, engine over fakeredis, full WS)
+├── tests/      83 pytest (rules, minority, engine over fakeredis, full WS, SPA)
 └── data/       bundled 40-question bank
 ```
 

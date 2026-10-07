@@ -91,6 +91,10 @@ class ConnectionRegistry:
         conn.player_id = None
         conn.is_host = False
 
+    def all(self) -> list[Connection]:
+        """Every live socket on this gateway (used by the keepalive pinger)."""
+        return [conn for conn in self._by_id.values() if not conn.closed]
+
     def in_room(self, code: str) -> list[Connection]:
         ids = self._by_room.get(code) or set()
         return [conn for conn_id in ids if (conn := self._by_id.get(conn_id)) and not conn.closed]
