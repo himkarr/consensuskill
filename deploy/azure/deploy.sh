@@ -5,8 +5,17 @@
 #
 # Creates (idempotently):
 #   resource group            ck-rg
+#   Log Analytics workspace   ck-log       (created only if the subscription
+#                                          forces one; ~0 cost at this scale)
 #   Container Apps environment ck-env     (Consumption plan, free grant)
 #   container app             ck-app       (public ingress on :8000)
+#
+# Region note: Azure for Students pins each subscription to a subset of regions,
+# and `az containerapp env create` otherwise auto-generates a Log Analytics
+# workspace that can be refused (RequestDisallowedByAzure) even in a region
+# Container Apps itself supports. So the script picks a region, then provisions
+# the workspace there itself and hands it over with --logs-workspace-id.
+# Pass LOCATION= to override, e.g. LOCATION=eastasia ./deploy/azure/deploy.sh
 #
 # ck-app is ONE revision with TWO containers:
 #   app    - FastAPI gateway + embedded round engine + the built React bundle
@@ -16,13 +25,19 @@
 # idle site costs nothing.
 #
 # Override anything through the environment, e.g.
-#   LOCATION=westeurope ADMIN_TOKEN=$(openssl rand -hex 16) ./deploy/azure/deploy.sh
+#   ADMIN_TOKEN=$(openssl rand -hex 16) ./deploy/azure/deploy.sh
 set -euo pipefail
 
 RG="${RG:-ck-rg}"
 ENV_NAME="${ENV_NAME:-ck-env}"
 APP_NAME="${APP_NAME:-ck-app}"
-LOCATION="${LOCATION:-eastus}"
+# Regions to try, in order. Azure for Students subscriptions are restricted to a
+# subset of these; the first that accepts a Log Analytics workspace wins.
+# eastasia is early on purpose - it is commonly allowed where India regions are
+# not, and it is the closest allowed region to Delhi.
+REGION_CANDIDATES="${REGION_CANDIDATES:-${LOCATION:-} eastasia centralindia southindia southeastasia westus2 eastus northeurope westeurope japaneast canadacentral ukwest}"
+LOCATION=""
+LAW_NAME="${LAW_NAME:-ck-log}"
 # Public image published by .github/workflows/deploy.yml (anonymous GHCR pull).
 # Point it at your own registry, or build it with deploy/azure/build.sh.
 IMAGE="${IMAGE:-ghcr.io/himkarr/consensuskill/web-app:latest}"
@@ -59,62 +74,98 @@ for provider in Microsoft.App Microsoft.OperationalInsights Microsoft.Insights; 
   fi
 done
 
-log "Resource group $RG ($LOCATION)"
-az group create --name "$RG" --location "$LOCATION" --output none
-
 env_exists() {
   az containerapp env show --name "$ENV_NAME" --resource-group "$RG" >/dev/null 2>&1
 }
 
-create_env() {
-  # $1 = region. Returns non-zero (and explains) if this region is refused.
-  local region="$1" err
-  if ! err=$(az containerapp env create \
-        --name "$ENV_NAME" --resource-group "$RG" --location "$region" \
-        --output none 2>&1); then
-    if printf '%s' "$err" | grep -qi 'RequestDisallowedByAzure\|not available\|not eligible\|restricted'; then
-      echo "    $region is not available on this subscription"
-    else
-      echo "$err" | tail -5
-    fi
-    return 1
-  fi
-  echo "    created in $region"
-  return 0
+law_id() {
+  az monitor log-analytics workspace show -g "$RG" -n "$LAW_NAME" --query customerId -o tsv 2>/dev/null || true
 }
 
-log "Container Apps environment $ENV_NAME"
+law_key() {
+  az monitor log-analytics workspace get-shared-keys -g "$RG" -n "$LAW_NAME" \
+    --query primarySharedKey -o tsv 2>/dev/null || true
+}
+
+# Does this subscription accept new resources in $1? Probed with a throwaway Log
+# Analytics workspace in a throwaway group: that is exactly the resource
+# `env create` trips over, and it is instant to make and cheap to delete.
+# (A workspace needs a resource group, which does not exist yet at this point.)
+region_works() {
+  local region="$1" probe="probe$RANDOM"
+  az group create -n "${RG}-probe" -l "$region" --output none >/dev/null 2>&1 || return 1
+  if az monitor log-analytics workspace create -g "${RG}-probe" -n "$probe" -l "$region" \
+       --retention-in-days 7 --output none >/dev/null 2>&1; then
+    az group delete -n "${RG}-probe" --yes >/dev/null 2>&1 || true
+    return 0
+  fi
+  az group delete -n "${RG}-probe" --yes >/dev/null 2>&1 || true
+  return 1
+}
+
+# Create the environment, reusing or provisioning the workspace in $1.
+create_env() {
+  local region="$1" id key
+  id="$(law_id)"
+  key="$(law_key)"
+
+  if [ -z "$id" ] || [ -z "$key" ]; then
+    log "Log Analytics workspace $LAW_NAME ($region)"
+    # 7 days of retention, and a hard daily cap so a noisy demo can never turn
+    # into a bill. Ingestion for this workload is a few MB/day at most.
+    az monitor log-analytics workspace create -g "$RG" -n "$LAW_NAME" -l "$region" \
+      --retention-in-days 7 --daily-quota-gb 0.1 --output none
+    id="$(law_id)"
+    key="$(law_key)"
+    [ -n "$id" ] || return 1
+  fi
+
+  az containerapp env create \
+    --name "$ENV_NAME" --resource-group "$RG" --location "$region" \
+    --logs-workspace-id "$id" --logs-workspace-key "$key" \
+    --output none 2>&1 | tail -5
+  az containerapp env show --name "$ENV_NAME" --resource-group "$RG" \
+    --query name -o tsv >/dev/null 2>&1
+}
+
 if env_exists; then
-  echo "already exists - keeping it"
-elif ! create_env "$LOCATION"; then
-  # Azure for Students pins a small set of regions per subscription. Fall back
-  # to any region the subscription actually offers rather than dying.
-  echo "retrying with a region this subscription allows..."
-  found=""
-  for candidate in $(az account list-locations \
-      --query "[?not(contains(name, 'preview')) && not(contains(name,'edge'))].name" \
-      -o tsv 2>/dev/null); do
-    [ -n "$candidate" ] || continue
-    printf '  trying %s\n' "$candidate"
-    if create_env "$candidate"; then
+  log "Container Apps environment $ENV_NAME"
+  LOCATION="$(az containerapp env show -n "$ENV_NAME" -g "$RG" --query location -o tsv)"
+  echo "already exists in $LOCATION - keeping it"
+else
+  log "Finding a region this subscription allows"
+  LOCATION=""
+  for candidate in $REGION_CANDIDATES; do
+    if [ -z "$candidate" ]; then continue; fi
+    printf '  %-16s ' "$candidate"
+    if region_works "$candidate"; then
+      echo "available"
       LOCATION="$candidate"
-      found="$candidate"
       break
     fi
+    echo "refused"
   done
-  [ -n "$found" ] || die "no region available for Container Apps on this subscription.
-    Check the list yourself with:
-      az account list-locations --query \"[?not(contains(name,'preview'))].name\" -o tsv
-    then re-run with: LOCATION=<one-of-them> ./deploy/azure/deploy.sh"
-  log "Using $LOCATION"
-  # The app and its Redis sidecar must live in the environment's region.
+  [ -n "$LOCATION" ] || die "no region on this subscription accepts a Log Analytics workspace.
+    Azure for Students restricts which regions you can deploy into. Pick one by
+    hand and re-run, e.g.:
+      LOCATION=<region> ./deploy/azure/deploy.sh"
+
+  log "Resource group $RG ($LOCATION)"
   az group create --name "$RG" --location "$LOCATION" --output none
+
+  log "Container Apps environment $ENV_NAME in $LOCATION"
+  if ! create_env "$LOCATION"; then
+    die "the environment was refused in $LOCATION even though a workspace was
+    accepted there. Container Apps may not be offered in that region - re-run
+    with REGION_CANDIDATES=\"<other> <other>\" to try others."
+  fi
+  echo "    created"
 fi
+
 # The public edge closes idle HTTP requests after 4 minutes by default. Live
 # sockets are safe (the gateway pings every 30s), but bump it anyway so a slow
-# room is never killed by the platform.
-# On a Consumption-only environment this switch needs a dedicated workload
-# profile, so a refusal here is informational, not fatal.
+# room is never killed by the platform. On a Consumption-only environment this
+# needs a dedicated workload profile, so a refusal here is informational.
 az containerapp env update --name "$ENV_NAME" --resource-group "$RG" \
   --request-idle-timeout 30 --output none 2>/dev/null || \
   echo "note: kept the default 4-minute ingress idle timeout (sockets are pinged every 30s)"
