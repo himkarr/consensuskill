@@ -116,15 +116,18 @@ jobs:
       AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
+      # Guarded: azure/login hard-fails on empty creds, which would break every
+      # push for anyone who has not wired up the service principal yet.
+      - name: Skip notice
+        if: env.AZURE_CLIENT_ID == '' || env.AZURE_TENANT_ID == '' || env.AZURE_CLIENT_SECRET == ''
+        run: echo "Azure service principal secrets are not set - deploy skipped."
       - uses: azure/login@v2
+        if: env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != '' && env.AZURE_CLIENT_SECRET != ''
         with:
           creds: |
             ${{ secrets.AZURE_CLIENT_ID }}
             ${{ secrets.AZURE_TENANT_ID }}
             ${{ secrets.AZURE_CLIENT_SECRET }}
-      - name: Skip notice
-        if: env.AZURE_CLIENT_ID == '' || env.AZURE_TENANT_ID == '' || env.AZURE_CLIENT_SECRET == ''
-        run: echo "Azure service principal secrets are not set - deploy skipped."
       - name: Deploy the new revision
         if: env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != '' && env.AZURE_CLIENT_SECRET != ''
         # ghcr.io needs a lowercase repo path; the package must be public for
