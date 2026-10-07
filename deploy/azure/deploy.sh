@@ -87,20 +87,16 @@ law_key() {
     --query primarySharedKey -o tsv 2>/dev/null || true
 }
 
-# Does this subscription accept new resources in $1? Probed with a throwaway Log
-# Analytics workspace in a throwaway group: that is exactly the resource
-# `env create` trips over, and it is instant to make and cheap to delete.
-# (A workspace needs a resource group, which does not exist yet at this point.)
+# Can this subscription create a Log Analytics workspace in $1? That is exactly
+# the resource `env create` trips over, and it is the cheapest possible probe.
+# The workspace lives in $RG, whose own location is only metadata - Azure lets
+# resources sit in regions other than the group's.
 region_works() {
-  local region="$1" probe="probe$RANDOM"
-  az group create -n "${RG}-probe" -l "$region" --output none >/dev/null 2>&1 || return 1
-  if az monitor log-analytics workspace create -g "${RG}-probe" -n "$probe" -l "$region" \
-       --retention-in-days 7 --output none >/dev/null 2>&1; then
-    az group delete -n "${RG}-probe" --yes >/dev/null 2>&1 || true
-    return 0
-  fi
-  az group delete -n "${RG}-probe" --yes >/dev/null 2>&1 || true
-  return 1
+  local region="$1" probe="probe$$$RANDOM"
+  az monitor log-analytics workspace create -g "$RG" -n "$probe" -l "$region" \
+    --retention-in-days 7 --output none >/dev/null 2>&1 || return 1
+  az monitor log-analytics workspace delete -g "$RG" -n "$probe" --yes >/dev/null 2>&1 || true
+  return 0
 }
 
 # Create the environment, reusing or provisioning the workspace in $1.
@@ -128,6 +124,12 @@ create_env() {
     --query name -o tsv >/dev/null 2>&1
 }
 
+# Probing happens inside $RG, so it has to exist. Its location is metadata only:
+# every resource below is created explicitly in the region we choose.
+GROUP_LOCATION="${GROUP_LOCATION:-eastus}"
+log "Resource group $RG ($GROUP_LOCATION)"
+az group create --name "$RG" --location "$GROUP_LOCATION" --output none
+
 if env_exists; then
   log "Container Apps environment $ENV_NAME"
   LOCATION="$(az containerapp env show -n "$ENV_NAME" -g "$RG" --query location -o tsv)"
@@ -146,12 +148,9 @@ else
     echo "refused"
   done
   [ -n "$LOCATION" ] || die "no region on this subscription accepts a Log Analytics workspace.
-    Azure for Students restricts which regions you can deploy into. Pick one by
-    hand and re-run, e.g.:
-      LOCATION=<region> ./deploy/azure/deploy.sh"
-
-  log "Resource group $RG ($LOCATION)"
-  az group create --name "$RG" --location "$LOCATION" --output none
+    Azure for Students restricts which regions you can deploy into, and the
+    list is per-subscription. See the troubleshooting note in
+    deploy/azure/README.md for how to probe it by hand."
 
   log "Container Apps environment $ENV_NAME in $LOCATION"
   if ! create_env "$LOCATION"; then

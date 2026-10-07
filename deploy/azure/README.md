@@ -108,6 +108,28 @@ REGISTRY_PASSWORD=$(az acr credential show -n $ACR --query passwords[0].value -o
   ./deploy/azure/deploy.sh
 ```
 
+Overriding the region:
+
+```bash
+LOCATION=eastasia ./deploy/azure/deploy.sh
+```
+
+If the script reports `refused` for every region, the subscription is pinned
+somewhere unusual. Azure for Students restricts which regions you can deploy
+into, and the list is per-subscription — ask Azure which ones you have, or probe
+by hand (this is what the script automates; put the workspaces in an existing
+group so only the *workspace* location is under test):
+
+```bash
+az group create -n probe -l eastus
+for r in eastasia centralindia southindia southeastasia westus2 northeurope; do
+  echo -n "$r: "; az monitor log-analytics workspace create -g probe -n w-$r -l $r -o none >/dev/null 2>&1 && echo ok || echo no
+done
+az group delete -n probe --yes
+```
+
+Then pass the winner as `LOCATION`.
+
 ## Step 3: play
 
 Open the URL. Create a room, then open the same URL on your phone (the room QR
