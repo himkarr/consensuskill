@@ -45,6 +45,8 @@ LAW_NAME="${LAW_NAME:-ck-log}"
 # ConsumptionOnly (free Consumption plan) is required: sidecar containers are
 # unsupported in an Express environment.
 ENV_MODE="${ENV_MODE:-ConsumptionOnly}"
+# Set to 1 internally so the Express-environment recovery below runs at most once.
+ENV_RETRIED="${ENV_RETRIED:-0}"
 # Public image published by .github/workflows/deploy.yml (anonymous GHCR pull).
 # Point it at your own registry, or build it with deploy/azure/build.sh.
 IMAGE="${IMAGE:-ghcr.io/himkarr/consensuskill/web-app:latest}"
@@ -168,7 +170,7 @@ if env_exists; then
     so the Redis sidecar cannot be deployed into it. Express and Standard
     environment modes cannot be converted. Recreate it:
 
-      az containerapp env delete -g $RG -n $ENV_NAME --yes --force
+      az containerapp env delete -g $RG -n $ENV_NAME --yes
       $0
     (the script re-creates it with --environment-mode $ENV_MODE)"
   fi
@@ -208,26 +210,55 @@ az containerapp env update --name "$ENV_NAME" --resource-group "$RG" \
   echo "note: kept the default 4-minute ingress idle timeout (sockets are pinged every 30s)"
 
 log "Deploying $APP_NAME from $IMAGE"
-# -o tsv --query prints just the FQDN; deployment errors still hit stderr.
-if ! FQDN=$(az deployment group create \
-  --resource-group "$RG" \
-  --name "ck-$(date +%s)" \
-  --template-file "$TEMPLATE" \
-  --parameters \
-      appName="$APP_NAME" \
-      environmentName="$ENV_NAME" \
-      location="$LOCATION" \
-      image="$IMAGE" \
-      allowedOrigins="$ALLOWED_ORIGINS" \
-      adminToken="$ADMIN_TOKEN" \
-      registryServer="$REGISTRY_SERVER" \
-      registryUsername="$REGISTRY_USERNAME" \
-      registryPassword="$REGISTRY_PASSWORD" \
-      minReplicas="$MIN_REPLICAS" \
-      maxReplicas="$MAX_REPLICAS" \
-  --query properties.outputs.fqdn.value \
-  --output tsv); then
-  die "deployment failed - re-run with: az deployment group create --resource-group $RG --template-file $TEMPLATE --verbose"
+
+deploy_app() {
+  # -o tsv --query prints just the FQDN; deployment errors still hit stderr.
+  az deployment group create \
+    --resource-group "$RG" \
+    --name "ck-$(date +%s)" \
+    --template-file "$TEMPLATE" \
+    --parameters \
+        appName="$APP_NAME" \
+        environmentName="$ENV_NAME" \
+        location="$LOCATION" \
+        image="$IMAGE" \
+        allowedOrigins="$ALLOWED_ORIGINS" \
+        adminToken="$ADMIN_TOKEN" \
+        registryServer="$REGISTRY_SERVER" \
+        registryUsername="$REGISTRY_USERNAME" \
+        registryPassword="$REGISTRY_PASSWORD" \
+        minReplicas="$MIN_REPLICAS" \
+        maxReplicas="$MAX_REPLICAS" \
+    --query properties.outputs.fqdn.value \
+    --output tsv 2>"$ERR_FILE"
+}
+
+ERR_FILE="$(mktemp)"
+trap 'rm -f "$ERR_FILE"' EXIT
+
+if ! FQDN=$(deploy_app); then
+  # An environment created before this script passed --environment-mode is an
+  # Express environment, and `env show` reports its mode as empty, so the only
+  # reliable signal is the resource provider refusing our sidecar. Recreate the
+  # environment in the right mode and retry once.
+  if grep -q 'ExpressEnvironmentFeatureNotSupported' "$ERR_FILE" && [ "$ENV_RETRIED" = 0 ]; then
+    ENV_RETRIED=1
+    log "Environment $ENV_NAME is Express - it cannot host the Redis sidecar"
+    log "Recreating it in $ENV_MODE mode (free Consumption plan, sidecars allowed)"
+    az containerapp env delete --name "$ENV_NAME" --resource-group "$RG" --yes
+    env_exists && die "could not delete the old environment $ENV_NAME; delete it in the portal and re-run"
+    log "Creating the environment in $LOCATION"
+    create_env "$LOCATION" || die "could not create the environment:
+$ENV_ERROR"
+    echo "    created"
+    if ! FQDN=$(deploy_app); then
+      die "deployment still failed after recreating the environment:
+$(cat "$ERR_FILE")"
+    fi
+  else
+    die "deployment failed:
+$(cat "$ERR_FILE")"
+  fi
 fi
 
 [ -n "$FQDN" ] || die "deployment produced no FQDN"

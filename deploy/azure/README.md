@@ -188,7 +188,7 @@ deployed.
 | Site loads, socket never connects | the browser console shows the `wss://` URL failing: confirm ingress `transport` is `auto` (never `http2`, which refuses WebSocket upgrades) and that `allowInsecure` is false so you are on `wss://`. |
 | `/health` returns `"redis": false` | the sidecar is not up: `az containerapp logs show -g ck-rg -n ck-app --container redis --tail 50`. |
 | Room dies after a few idle minutes | a proxy in front is closing silent sockets; the gateway already pings every 30s (`WS_PING_SECONDS`), so raise the environment idle timeout: `az containerapp env update -g ck-rg -n ck-env --request-idle-timeout 30`. |
-| `ExpressEnvironmentFeatureNotSupported` | the environment was created in **Express** mode, which forbids sidecar containers. Express also has no TCP ingress or internal service discovery, so neither a Redis sidecar nor a separate Redis app works there. Delete and let the script recreate it in `ConsumptionOnly` mode: `az containerapp env delete -g ck-rg -n ck-env --yes --force`, then re-run. |
+| `ExpressEnvironmentFeatureNotSupported` | the environment was created in **Express** mode, which forbids sidecar containers. Express also has no TCP ingress and no internal service discovery, so neither a Redis sidecar nor a separate Redis app works there. The script now detects this and recreates the environment in `ConsumptionOnly` mode by itself; to do it by hand: `az containerapp env delete -g ck-rg -n ck-env --yes`, then re-run. |
 | First request after a break takes 30s | normal: the app scaled to zero. Lower nothing; raise `minReplicas` to 1 only if you want instant cold starts (and accept the cost). |
 
 ## Presenting
