@@ -47,6 +47,18 @@ TEMPLATE="$HERE/containerapp.json"
 
 log "Using subscription $(az account show --query name -o tsv)"
 
+# A brand-new subscription has never registered these. Container Apps wires
+# Log Analytics into every managed environment, so `env create` dies on
+# Microsoft.OperationalInsights if it is missing. Registering is idempotent
+# and free; a wrong region on a provider is not, so the location is unset.
+for provider in Microsoft.App Microsoft.OperationalInsights Microsoft.Insights; do
+  state=$(az provider show --namespace "$provider" --query registrationState -o tsv 2>/dev/null || echo Unregistered)
+  if [ "$state" != Registered ]; then
+    log "Registering $provider"
+    az provider register --namespace "$provider" --wait --only-show-errors
+  fi
+done
+
 log "Resource group $RG ($LOCATION)"
 az group create --name "$RG" --location "$LOCATION" --output none
 
