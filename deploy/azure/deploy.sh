@@ -42,9 +42,11 @@ APP_NAME="${APP_NAME:-ck-app}"
 REGION_CANDIDATES="${REGION_CANDIDATES:-${LOCATION:-} koreacentral eastasia centralindia southindia southeastasia westus2 northeurope westeurope japaneast canadacentral ukwest}"
 LOCATION=""
 LAW_NAME="${LAW_NAME:-ck-log}"
-# ConsumptionOnly (free Consumption plan) is required: sidecar containers are
-# unsupported in an Express environment.
-ENV_MODE="${ENV_MODE:-ConsumptionOnly}"
+# Environment modes to try, in order. Express is never valid here: it forbids
+# sidecar containers, which is how Redis reaches the gateway. WorkloadProfiles
+# (v2) is Azure's recommended default and supports idle timeout and TCP ingress;
+# ConsumptionOnly (v1) is the legacy fallback if v2 is refused for any reason.
+ENV_MODES="${ENV_MODES:-WorkloadProfiles ConsumptionOnly}"
 # Set to 1 internally so the Express-environment recovery below runs at most once.
 ENV_RETRIED="${ENV_RETRIED:-0}"
 # Public image published by .github/workflows/deploy.yml (anonymous GHCR pull).
@@ -137,29 +139,39 @@ create_env() {
     [ -n "$id" ] || return 1
   fi
 
-  # Create the environment from an ARM template rather than
+  # Create the environment from an ARM template, never from
   # 'az containerapp env create --environment-mode': that flag only exists in
-  # newer containerapp CLI extensions, and older ones silently create an Express
-  # environment instead, which forbids sidecar containers and has no TCP ingress
-  # or internal service discovery - so neither a Redis sidecar nor a separate
-  # Redis app can work there. environmentMode is a plain ARM property, so this
-  # works on any CLI version. ConsumptionOnly is still the free Consumption plan.
-  if ! err=$(az deployment group create \
-        --resource-group "$RG" \
-        --name "ck-env-$(date +%s)" \
-        --template-file "$ENV_TEMPLATE" \
-        --parameters \
-            envName="$ENV_NAME" \
-            location="$region" \
-            environmentMode="$ENV_MODE" \
-            logsWorkspaceId="$id" \
-            logsWorkspaceKey="$key" \
-        --output none 2>&1); then
+  # newer containerapp CLI extensions and older ones reject it outright. Worse,
+  # 'environmentMode' itself only exists from apiVersion 2026-07-01 - deploy an
+  # older apiVersion and the property is silently dropped, Azure builds an
+  # Express environment, and the failure only surfaces later as a sidecar error
+  # that looks nothing like what went wrong.
+  #
+  # Try each non-Express mode until one is accepted rather than betting on a
+  # single guess: environment modes cannot be converted, so a wrong pick costs a
+  # full delete-and-recreate round trip.
+  local mode=""
+  for mode in $ENV_MODES; do
+    if err=$(az deployment group create \
+          --resource-group "$RG" \
+          --name "ck-env-$(date +%s)" \
+          --template-file "$ENV_TEMPLATE" \
+          --parameters \
+              envName="$ENV_NAME" \
+              location="$region" \
+              environmentMode="$mode" \
+              logsWorkspaceId="$id" \
+              logsWorkspaceKey="$key" \
+          --output none 2>&1); then
+      az containerapp env show --name "$ENV_NAME" --resource-group "$RG" \
+        --query name -o tsv >/dev/null 2>&1
+      echo "    mode $mode"
+      return 0
+    fi
+    echo "    mode $mode refused - trying the next"
     ENV_ERROR="$err"
-    return 1
-  fi
-  az containerapp env show --name "$ENV_NAME" --resource-group "$RG" \
-    --query name -o tsv >/dev/null 2>&1
+  done
+  return 1
 }
 
 # Probing happens inside $RG, so it has to exist. Its location is metadata only:
@@ -182,7 +194,7 @@ if env_exists; then
 
       az containerapp env delete -g $RG -n $ENV_NAME --yes
       $0
-    (the script re-creates it with --environment-mode $ENV_MODE)"
+    (the script re-creates it, trying: $ENV_MODES)"
   fi
 else
   log "Finding a region this subscription allows"
@@ -254,8 +266,14 @@ if ! FQDN=$(deploy_app); then
   if grep -q 'ExpressEnvironmentFeatureNotSupported' "$ERR_FILE" && [ "$ENV_RETRIED" = 0 ]; then
     ENV_RETRIED=1
     log "Environment $ENV_NAME is Express - it cannot host the Redis sidecar"
-    log "Recreating it in $ENV_MODE mode (free Consumption plan, sidecars allowed)"
+    log "Recreating it (non-Express modes, sidecars allowed): $ENV_MODES"
     az containerapp env delete --name "$ENV_NAME" --resource-group "$RG" --yes
+    # Deletion is polled by the CLI but the environment can linger a moment;
+    # creating while it still exists just fails the whole recovery.
+    for _ in $(seq 1 24); do
+      env_exists || break
+      sleep 5
+    done
     env_exists && die "could not delete the old environment $ENV_NAME; delete it in the portal and re-run"
     log "Creating the environment in $LOCATION"
     create_env "$LOCATION" || die "could not create the environment:

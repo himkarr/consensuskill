@@ -42,8 +42,21 @@ restart discards rooms that were in progress.
 ```bash
 git clone https://github.com/himkarr/consensuskill
 cd consensuskill
-./deploy/azure/deploy.sh
+bash deploy/azure/deploy.sh
 ```
+
+**Azure Cloud Shell** is the easiest place to run this: `az` is already
+installed and already logged in. Cloud Shell starts empty every session, so
+clone first. Pick the **Bash** shell (the bash → icon), not PowerShell:
+
+```bash
+git clone https://github.com/himkarr/consensuskill
+cd consensuskill
+bash deploy/azure/deploy.sh
+```
+
+> Use `bash deploy/azure/deploy.sh`, not `./deploy/azure/deploy.sh`. A Windows
+> clone strips the executable bit, and you get `Permission denied`.
 
 That creates the resource group, the Container Apps environment and the app,
 then waits for `/health`. It prints the URL:
@@ -60,7 +73,7 @@ Useful overrides:
 LOCATION=westeurope \
 IMAGE=ghcr.io/you/consensuskill/web-app:latest \
 ADMIN_TOKEN=$(openssl rand -hex 16) \
-  ./deploy/azure/deploy.sh
+  bash deploy/azure/deploy.sh
 ```
 
 `deploy.sh` is idempotent — re-run it after a new image is published and it
@@ -84,17 +97,17 @@ GitHub packages are **private by default** and Azure pulls anonymously, so open
 that package page → *Settings* → *Change visibility* → **Public**. Then:
 
 ```bash
-IMAGE=ghcr.io/<you>/consensuskill/web-app:latest ./deploy/azure/deploy.sh
+IMAGE=ghcr.io/<you>/consensuskill/web-app:latest bash deploy/azure/deploy.sh
 ```
 
 **Or build it yourself.** No CI involved:
 
 ```bash
 # a) GHCR (free), needs `docker login ghcr.io` with a PAT (scope write:packages)
-GHCR_IMAGE=ghcr.io/<you>/consensuskill/web-app ./deploy/azure/build.sh ghcr
+GHCR_IMAGE=ghcr.io/<you>/consensuskill/web-app bash deploy/azure/build.sh ghcr
 
 # b) Azure Container Registry - ACR builds in the cloud, no local docker
-./deploy/azure/build.sh acr          # ~$5/month for the Basic registry
+bash deploy/azure/build.sh acr          # ~$5/month for the Basic registry
 ```
 
 With an ACR the image is private, so give the app credentials:
@@ -105,13 +118,13 @@ IMAGE=$(az acr show -n $ACR --query loginServer -o tsv)/web-app:latest
 REGISTRY_SERVER=$(az acr show -n $ACR --query loginServer -o tsv) \
 REGISTRY_USERNAME=$ACR \
 REGISTRY_PASSWORD=$(az acr credential show -n $ACR --query passwords[0].value -o tsv) \
-  ./deploy/azure/deploy.sh
+  bash deploy/azure/deploy.sh
 ```
 
 Overriding the region:
 
 ```bash
-LOCATION=eastasia ./deploy/azure/deploy.sh
+LOCATION=eastasia bash deploy/azure/deploy.sh
 ```
 
 If the script reports `refused` for every region, the subscription is pinned
@@ -188,7 +201,8 @@ deployed.
 | Site loads, socket never connects | the browser console shows the `wss://` URL failing: confirm ingress `transport` is `auto` (never `http2`, which refuses WebSocket upgrades) and that `allowInsecure` is false so you are on `wss://`. |
 | `/health` returns `"redis": false` | the sidecar is not up: `az containerapp logs show -g ck-rg -n ck-app --container redis --tail 50`. |
 | Room dies after a few idle minutes | a proxy in front is closing silent sockets; the gateway already pings every 30s (`WS_PING_SECONDS`), so raise the environment idle timeout: `az containerapp env update -g ck-rg -n ck-env --request-idle-timeout 30`. |
-| `ExpressEnvironmentFeatureNotSupported` | the environment was created in **Express** mode, which forbids sidecar containers. Express also has no TCP ingress and no internal service discovery, so neither a Redis sidecar nor a separate Redis app works there. The script now detects this and recreates the environment in `ConsumptionOnly` mode by itself; to do it by hand: `az containerapp env delete -g ck-rg -n ck-env --yes`, then re-run. |
+| `ExpressEnvironmentFeatureNotSupported` | the environment came out as **Express** mode, which forbids sidecar containers. Express also has no TCP ingress and no internal service discovery, so neither a Redis sidecar nor a separate Redis app works there. The script deletes the environment and recreates it in a non-Express mode by itself; to do it by hand: `az containerapp env delete -g ck-rg -n ck-env --yes`, then re-run. |
+| Environment created but still Express afterwards | the `environmentMode` property only exists from apiVersion `2026-07-01`. `deploy/azure/environment.json` pins that version on purpose - do not downgrade it, older versions silently drop the property and Azure builds an Express environment. |
 | First request after a break takes 30s | normal: the app scaled to zero. Lower nothing; raise `minReplicas` to 1 only if you want instant cold starts (and accept the cost). |
 
 ## Presenting
@@ -197,9 +211,9 @@ Scale-to-zero means a 20-40s cold start, and you do not want to stand in front
 of a class waiting for it. Warm the app first:
 
 ```bash
-MIN_REPLICAS=1 ./deploy/azure/deploy.sh
+MIN_REPLICAS=1 bash deploy/azure/deploy.sh
 ```
 
 That keeps one replica (and its Redis sidecar) running, so the URL opens
-instantly. Afterwards, `MIN_REPLICAS=0 ./deploy/azure/deploy.sh` goes back to
+instantly. Afterwards, `MIN_REPLICAS=0 bash deploy/azure/deploy.sh` goes back to
 scale-to-zero.

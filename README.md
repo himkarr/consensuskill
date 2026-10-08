@@ -177,7 +177,7 @@ same round — lives, votes and chat intact.
 | Images + CD | GitHub Actions → ghcr.io → ACA | `.github/workflows/deploy.yml` (gate → push → deploy/azure) |
 
 ```bash
-./deploy/azure/deploy.sh          # creates everything, prints the https URL
+bash deploy/azure/deploy.sh          # creates everything, prints the https URL
 ```
 
 One command, one container app, `minReplicas: 0` so an idle site is free, and a

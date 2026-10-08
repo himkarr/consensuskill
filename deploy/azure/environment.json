@@ -6,9 +6,10 @@
     "location": { "type": "string" },
     "environmentMode": {
       "type": "string",
-      "defaultValue": "ConsumptionOnly",
+      "defaultValue": "WorkloadProfiles",
+      "allowedValues": [ "WorkloadProfiles", "ConsumptionOnly" ],
       "metadata": {
-        "description": "ConsumptionOnly is required: an Express environment forbids sidecar containers, which is how Redis reaches the gateway."
+        "description": "Must not be Express: an Express environment forbids sidecar containers, which is how Redis reaches the gateway. Requires apiVersion 2026-07-01 - older apiVersions silently drop this property and Azure creates an Express environment instead."
       }
     },
     "logsWorkspaceId": { "type": "string" },
@@ -17,7 +18,7 @@
   "resources": [
     {
       "type": "Microsoft.App/managedEnvironments",
-      "apiVersion": "2024-03-01",
+      "apiVersion": "2026-07-01",
       "name": "[parameters('envName')]",
       "location": "[parameters('location')]",
       "properties": {

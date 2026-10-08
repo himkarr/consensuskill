@@ -17,3 +17,6 @@ coverage/
 htmlcov/
 *.log
 .DS_Store
+
+# tsc incremental build cache
+frontend/tsconfig.tsbuildinfo
